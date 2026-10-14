@@ -102,7 +102,10 @@ Result uninstall(const Request& req, const std::string& container, const Progres
         remove_file(dir / kConfigName);
         std::error_code ec;
         for (const auto& e : fs::directory_iterator(dir, ec)) {
-            if (e.path().extension() == ".log") remove_file(e.path());
+            const std::string name = path_utf8(e.path().filename());
+            // .log covers strojanka.log; crash diagnostics (see common/crash_handler.*) aren't
+            // named with .log alone (the .dmp side file isn't), so match the whole family too.
+            if (e.path().extension() == ".log" || starts_with(name, "strojanka-crash")) remove_file(e.path());
         }
         // Only data inside the install folder is deleted; a database kept elsewhere stays.
         if (!existing.database_path.empty() && inside(utf8_path(existing.database_path), dir)) {

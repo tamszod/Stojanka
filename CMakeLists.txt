@@ -14,6 +14,11 @@ option(STROJANKA_BUILD_TESTS "Build the unit tests" ON)
 if(MSVC)
   add_compile_options(/utf-8 /W3 /permissive- /Zc:__cplusplus /EHsc)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+  # Release keeps full optimization but also emits a .pdb, so a crash-handler .dmp from a
+  # shipped binary (see common/crash_handler.*) can later be matched to function/file/line.
+  # /OPT:REF,ICF restores the dead-code/COMDAT-folding stripping that /DEBUG otherwise disables.
+  add_compile_options($<$<CONFIG:Release>:/Zi>)
+  add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF,ICF>)
 endif()
 
 configure_file(src/core/version.h.in "${CMAKE_BINARY_DIR}/generated/core/version.h" @ONLY)

@@ -122,16 +122,26 @@ void Gbdt::train(const std::vector<std::vector<float>>& X, const std::vector<uin
             if (best_f < 0) continue;
             std::vector<size_t> left, right;
             for (size_t i : w.rows) (bin[best_f][i] <= best_b ? left : right).push_back(i);
-            Node& node = tree[w.node];
-            node.feature = best_f;
-            // bin b covers values <= edges[b-1]; bin 0 is NaN (always left)
-            node.threshold = best_b == 0 ? -std::numeric_limits<float>::infinity() : edges[best_f][best_b - 1];
-            node.left = static_cast<int>(tree.size());
-            node.right = node.left + 1;
+            // Capture the child indices as plain ints before touching the vector again: the two
+            // push_back calls below may reallocate tree's storage, which would turn a reference
+            // held across them into a dangling one (undefined behavior -- a crash observed in
+            // the field, see GitHub issue #2, because it depends on whether something else has
+            // since reused the freed memory, which is far more likely with many threads
+            // allocating concurrently than in a quiet single-threaded test).
+            const int left_idx = static_cast<int>(tree.size());
+            const int right_idx = left_idx + 1;
+            {
+                Node& node = tree[w.node];
+                node.feature = best_f;
+                // bin b covers values <= edges[b-1]; bin 0 is NaN (always left)
+                node.threshold = best_b == 0 ? -std::numeric_limits<float>::infinity() : edges[best_f][best_b - 1];
+                node.left = left_idx;
+                node.right = right_idx;
+            }
             tree.push_back({});
             tree.push_back({});
-            stack.push_back({node.left, std::move(left), w.depth + 1});
-            stack.push_back({node.right, std::move(right), w.depth + 1});
+            stack.push_back({left_idx, std::move(left), w.depth + 1});
+            stack.push_back({right_idx, std::move(right), w.depth + 1});
         }
         // Update all scores with the new tree (rows outside the sample too).
         for (size_t i = 0; i < n; ++i) {
