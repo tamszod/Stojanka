@@ -1,0 +1,33 @@
+# Secrets: the settings file holds the Discord bot token
+strojanka.conf
+*.conf
+.env
+.env.*
+*token*.txt
+
+# Databases, their WAL side files and upgrade backups
+*.db
+*.db-wal
+*.db-shm
+*.db.backup-*
+data/
+
+# Local installs or test runs inside the repo
+install/
+test_install/
+
+# Build output
+build/
+dist/
+.vcpkg/
+vcpkg_installed/
+
+# Logs
+*.log
+
+# Editors and OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

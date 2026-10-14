@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Strojanka Server</title>
+<style>
+  :root {
+    --bg: #0B1020; --panel: #121A2E; --panel-2: #0F1627; --line: #22304D; --text: #E6EBF5; --muted: #8C98B1;
+    --accent: #22A6C3; --accent-2: #2DD4BF; --ok: #34D399; --warn: #FBBF24; --bad: #F87171; --debug: #7C8AA5;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.25);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #F3F5FA; --panel: #FFFFFF; --panel-2: #F8FAFD; --line: #E1E6F0; --text: #0F172A; --muted: #5B6476;
+      --accent: #0E7490; --accent-2: #14B8A6; --ok: #059669; --warn: #B45309; --bad: #DC2626; --debug: #64748B;
+      --shadow: 0 1px 2px rgba(15,23,42,.06), 0 6px 18px rgba(15,23,42,.06);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 13.5px/1.45 "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+         background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 18px;
+           background: linear-gradient(100deg, #1E1B4B 0%, #0E7490 100%); color: #EAF7FA; }
+  header svg { width: 36px; height: 36px; flex: none; filter: drop-shadow(0 3px 8px rgba(0,0,0,.3)); }
+  header .title b { font-size: 16px; display: block; letter-spacing: .2px; }
+  header .title span { font-size: 11.5px; opacity: .75; white-space: nowrap; }
+  header button, .pill { white-space: nowrap; flex: none; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 99px;
+          background: rgba(0,0,0,.25); font-weight: 600; font-size: 12.5px; margin-left: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9CA3AF; }
+  .dot.online { background: #34D399; box-shadow: 0 0 0 4px rgba(52,211,153,.25); }
+  .dot.starting { background: #FBBF24; animation: pulse 1s infinite; }
+  .dot.error { background: #F87171; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  header .spacer { flex: 1; }
+  button { font: inherit; font-weight: 600; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+           border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1); color: inherit; }
+  button:hover { background: rgba(255,255,255,.18); }
+  button.primary { background: #EAF7FA; color: #0B3B47; border-color: transparent; }
+  button:disabled { opacity: .45; cursor: default; }
+  .banner { margin: 12px 18px 0; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--bad) 14%, var(--panel));
+            border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--line)); white-space: pre-wrap; }
+  .banner b { color: var(--bad); }
+  .banner button { color: var(--text); border-color: var(--line); background: var(--panel); margin: 8px 8px 0 0; }
+  .cards { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; padding: 12px 18px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+  .card small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .card b { display: block; font-size: 19px; font-weight: 650; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card span { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .meter { height: 5px; background: var(--line); border-radius: 9px; margin-top: 6px; overflow: hidden; }
+  .meter div { height: 100%; background: var(--ok); width: 0; transition: width .3s; }
+  .meter.low div { background: var(--warn); } .meter.crit div { background: var(--bad); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 38%) 1fr; gap: 12px; padding: 12px 18px 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+            display: flex; flex-direction: column; min-height: 0; }
+  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0;
+               padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+  section h2 .spacer { flex: 1; }
+  .scroll { overflow: auto; flex: 1; min-height: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 7px 10px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+  td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); white-space: nowrap; }
+  td.sym { font-weight: 700; }
+  td.name { color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+  .t-increasing { color: var(--ok); } .t-decreasing { color: var(--bad); } .t-stagnating { color: var(--muted); }
+  .empty { color: var(--muted); padding: 18px 14px; }
+  .chips button { font-size: 11px; padding: 3px 9px; border-color: var(--line); background: transparent; color: var(--muted); }
+  .chips button.on { color: var(--text); background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
+  #log { font: 12px/1.55 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; padding: 8px 12px; background: var(--panel-2);
+         white-space: pre-wrap; word-break: break-word; user-select: text; }
+  #log .l { color: var(--text); opacity: .9; }
+  #log .WARN { color: var(--warn); } #log .ERROR { color: var(--bad); } #log .DEBUG { color: var(--debug); }
+  #log .cmd { color: var(--accent-2); font-weight: 700; margin-top: 8px; }
+  #log .reply { font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif; font-size: 13px; padding: 6px 10px 8px;
+                margin: 2px 0 6px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 8px 8px 0; }
+  #log .reply.bad { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, transparent); }
+  #log .reply pre { font: 12px/1.45 ui-monospace, Consolas, monospace; margin: 6px 0; padding: 8px; background: var(--panel); border-radius: 6px; overflow-x: auto; }
+  #log .reply code { font: 12px ui-monospace, Consolas, monospace; background: var(--panel); padding: 1px 4px; border-radius: 4px; }
+  #log.f-warn .l.INFO, #log.f-warn .l.DEBUG, #log.f-err .l.INFO, #log.f-err .l.DEBUG, #log.f-err .l.WARN { display: none; }
+  .prompt { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding: 8px 12px; }
+  .prompt span { color: var(--accent-2); font: 700 13px ui-monospace, Consolas, monospace; }
+  .prompt input { flex: 1; font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--text); background: transparent;
+                  border: none; outline: none; padding: 6px 0; }
+  .prompt button { color: var(--text); border-color: var(--line); background: transparent; font-size: 12px; }
+  .busy { color: var(--muted); font-size: 12px; }
+  .tabs button { text-transform: none; letter-spacing: 0; font-size: 12px; }
+  .note { color: var(--muted); font-size: 12px; padding: 10px 14px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+  .badge.public { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+  .badge.proving { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .badge.training { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+  .badge.benchmark { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+  .pos { color: var(--ok); } .neg { color: var(--bad); }
+  #arena tr { cursor: pointer; }
+  #arena tr:hover td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 100 100" aria-hidden="true">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E1B4B"/><stop offset="1" stop-color="#0E7490"/></linearGradient></defs>
+    <rect x="4" y="4" width="92" height="92" rx="22" fill="url(#g)" stroke="rgba(255,255,255,.3)" stroke-width="2"/>
+    <polyline points="17,74 37,38 55,64 79,27" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="55" cy="64" r="7.5" fill="#34D399" stroke="#fff" stroke-width="3"/>
+    <circle cx="79" cy="27" r="7.5" fill="#FBBF24" stroke="#fff" stroke-width="3"/>
+  </svg>
+  <div class="title"><b>Strojanka Server</b><span id="version">version</span></div>
+  <div class="pill"><i class="dot" id="dot"></i><span id="state">Stopped</span></div>
+  <div class="spacer"></div>
+  <button id="b-settings" title="Open strojanka.conf">Settings</button>
+  <button id="b-folder" title="Open the install folder">Folder</button>
+  <button id="b-logfile" title="Open strojanka.log">Log file</button>
+  <button id="b-toggle" class="primary">Stop</button>
+</header>
+
+<div class="banner" id="banner" hidden><b>The bot is not running.</b> <span id="banner-text"></span><br>
+  <button id="b-retry">Try again</button><button id="b-settings2">Edit settings</button></div>
+
+<div class="cards">
+  <div class="card"><small>Users</small><b id="c-users">–</b><span>people who used the bot</span></div>
+  <div class="card"><small>Watched stocks</small><b id="c-watched">–</b><span id="c-watched-sub">across all users</span></div>
+  <div class="card"><small>Alerts sent</small><b id="c-alerts">–</b><span>PEAK and SUPPORT calls</span></div>
+  <div class="card"><small>Headlines stored</small><b id="c-news">–</b><span id="c-news-sub">news weight –</span></div>
+  <div class="card"><small>Database</small><b id="c-db">–</b><span id="c-db-path" title=""></span></div>
+  <div class="card"><small>Disk free</small><b id="c-disk">–</b><div class="meter" id="c-meter"><div></div></div></div>
+  <div class="card"><small>Last price check</small><b id="c-cycle">–</b><span id="c-cycle-sub"></span></div>
+</div>
+
+<main>
+  <section>
+    <h2><span class="chips tabs"><button data-tab="stocks" class="on">Watched stocks</button><button data-tab="arena">Arena</button></span>
+      <span class="spacer"></span><span class="busy" id="stocks-count"></span></h2>
+    <div class="scroll" id="tab-stocks">
+      <table><thead><tr><th>Stock</th><th>Price</th><th>Trend</th><th>Watchers</th><th>Last alert</th></tr></thead>
+        <tbody id="stocks"></tbody></table>
+      <div class="empty" id="stocks-empty">No stocks are being watched yet. Users add them with <b>monitor FCX</b> in Discord.</div>
+    </div>
+    <div class="scroll" id="tab-arena" hidden>
+      <table><thead><tr><th>Bot</th><th>Stage</th><th>Value</th><th>Return</th><th>vs Atlas</th><th>Trades</th><th>History test</th></tr></thead>
+        <tbody id="arena"></tbody></table>
+      <div class="empty" id="arena-empty">The arena starts shortly after the bot connects: it first downloads prices and tests every bot on about 8 years of history.</div>
+      <div class="note">Each bot trades $1,000 of play money. It reports in the Discord channel only after passing the history test
+        <b>and</b> 40 days of live trading. Click a bot for details.</div>
+    </div>
+  </section>
+  <section>
+    <h2>Console <span class="spacer"></span>
+      <span class="chips"><button data-f="" class="on">All</button><button data-f="f-warn">Warnings</button><button data-f="f-err">Errors</button></span>
+      <span class="chips"><button id="b-clear">Clear</button></span></h2>
+    <div class="scroll" id="logbox"><div id="log"></div></div>
+    <div class="prompt"><span>strojanka ›</span>
+      <input id="cmd" spellcheck="false" autocomplete="off" placeholder="type a command, e.g. status, stocks, check, admin add <id> · help lists everything">
+      <span class="busy" id="cmd-busy" hidden>working…</span>
+      <button id="b-run">Run</button></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let info = {}, state = {}, history = [], hpos = 0, follow = true;
+const MAX_LINES = 2000;
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+function md(text) {
+  const parts = String(text).split('```');
+  return parts.map((p, i) => {
+    if (i % 2) return '<pre>' + esc(p.replace(/^\n/, '')) + '</pre>';
+    return esc(p).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
+                 .replace(/\*([^*\n]+)\*/g, '<i>$1</i>').replace(/&lt;@!?(\d+)&gt;/g, '@$1').replace(/\n/g, '<br>');
+  }).join('');
+}
+function trimLog() { const l = $('log'); while (l.childElementCount > MAX_LINES) l.removeChild(l.firstChild); }
+function scrollDown() { if (follow) { const b = $('logbox'); b.scrollTop = b.scrollHeight; } }
+function addLine(level, line) {
+  const d = document.createElement('div');
+  d.className = 'l ' + level; d.textContent = line;
+  $('log').appendChild(d);
+}
+window.__logs = lines => { lines.forEach(([lvl, line]) => addLine(lvl, line)); trimLog(); scrollDown(); };
+$('logbox').addEventListener('scroll', () => { const b = $('logbox'); follow = b.scrollTop + b.clientHeight >= b.scrollHeight - 30; });
+
+function ago(iso) {
+  if (!iso) return 'never';
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (s < 90) return 'just now';
+  if (s < 5400) return Math.round(s / 60) + ' min ago';
+  return Math.round(s / 3600) + ' h ago';
+}
+function uptime(iso) {
+  if (!iso) return '';
+  let s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+function bytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'; }
+
+async function refreshState() {
+  try { state = await window.serverState(); } catch (e) { return; }
+  const st = state.state;
+  $('dot').className = 'dot ' + (st === 'online' ? 'online' : st === 'starting' || st === 'stopping' ? 'starting' : st === 'error' ? 'error' : '');
+  $('state').textContent = st === 'online' ? `Online as ${state.bot_name} · up ${uptime(state.started_at)}`
+                         : st === 'starting' ? 'Connecting to Discord…' : st === 'stopping' ? 'Stopping…'
+                         : st === 'error' ? 'Not running' : 'Stopped';
+  $('b-toggle').textContent = st === 'online' || st === 'starting' ? 'Stop' : 'Start';
+  $('b-toggle').disabled = st === 'stopping';
+  $('banner').hidden = st !== 'error';
+  $('banner-text').textContent = state.error || '';
+  const s = state.stats;
+  if (!s) return;
+  $('c-users').textContent = s.users; $('c-watched').textContent = s.watched_symbols;
+  $('c-watched-sub').textContent = `${s.watch_entries} watch-list entries`;
+  $('c-alerts').textContent = s.alerts; $('c-news').textContent = s.headlines;
+  $('c-news-sub').textContent = 'news weight ' + Number(s.news_weight).toFixed(3);
+  $('c-db').textContent = bytes(s.db_size); $('c-db-path').textContent = s.db_path; $('c-db-path').title = s.db_path;
+  if (s.disk_capacity) {
+    $('c-disk').textContent = bytes(s.disk_free);
+    const used = 1 - s.disk_free / s.disk_capacity;
+    $('c-meter').querySelector('div').style.width = (used * 100).toFixed(0) + '%';
+    $('c-meter').className = 'meter' + (s.disk_free < s.disk_threshold ? ' crit' : s.disk_free < s.disk_threshold * 3 ? ' low' : '');
+  }
+  $('c-cycle').textContent = ago(s.cycle_at);
+  $('c-cycle-sub').textContent = s.cycle_total ? `${s.cycle_refreshed}/${s.cycle_total} refreshed` + (s.cycle_failures ? ' · ⚠ failing' : '') : '';
+}
+
+async function refreshStocks() {
+  let rows = [];
+  try { rows = await window.serverStocks(); } catch (e) { return; }
+  $('stocks-empty').hidden = rows.length > 0;
+  $('stocks-count').textContent = rows.length ? rows.length + ' stocks' : '';
+  $('stocks').innerHTML = rows.map(r => `<tr><td class="sym" title="${esc(r.name)}">${esc(r.symbol)}</td>
+    <td>${r.price ? esc(r.price_text) : '–'}</td><td class="t-${esc(r.trend)}">${esc(r.trend || '–')}</td>
+    <td>${r.watchers}</td><td>${esc(r.last_signal || '–')}</td></tr>`).join('');
+}
+
+function pct(v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%'; }
+async function refreshArena() {
+  let rows = [];
+  try { rows = await window.arenaBots(); } catch (e) { return; }
+  $('arena-empty').hidden = rows.length > 0;
+  $('arena').innerHTML = rows.map(r => {
+    const live = r.stage !== 'training';
+    const test = r.stage === 'benchmark' ? 'the market' : r.passed ? `✓ ${pct(r.bt_cagr)}/yr` : (r.verdict ? '✗ not passed' : '…');
+    return `<tr data-bot="${esc(r.name)}" title="${esc(r.origin)}: ${esc(r.idea)}">
+      <td class="sym">${esc(r.name)}</td><td><span class="badge ${esc(r.stage)}">${esc(r.stage_label)}</span></td>
+      <td>${live ? '$' + r.value.toFixed(2) : '–'}</td>
+      <td class="${r.live_return >= 0 ? 'pos' : 'neg'}">${live ? pct(r.live_return) : '–'}</td>
+      <td class="${r.vs_atlas >= 0 ? 'pos' : 'neg'}">${live && r.stage !== 'benchmark' ? pct(r.vs_atlas) : '–'}</td>
+      <td>${live ? r.live_trades : '–'}</td><td title="${esc(r.verdict)}">${esc(test)}</td></tr>`;
+  }).join('');
+  document.querySelectorAll('#arena tr').forEach(tr => tr.onclick = () => run('arena ' + tr.dataset.bot));
+}
+document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === b));
+  $('tab-stocks').hidden = b.dataset.tab !== 'stocks';
+  $('tab-arena').hidden = b.dataset.tab !== 'arena';
+  $('stocks-count').hidden = b.dataset.tab !== 'stocks';
+  if (b.dataset.tab === 'arena') refreshArena();
+});
+
+async function run(line) {
+  line = line.trim();
+  if (!line) return;
+  if (line === 'clear') { $('log').innerHTML = ''; return; }
+  history.push(line); hpos = history.length;
+  const c = document.createElement('div'); c.className = 'cmd'; c.textContent = 'strojanka › ' + line;
+  $('log').appendChild(c); follow = true; scrollDown();
+  $('cmd-busy').hidden = false; $('cmd').disabled = true;
+  let r;
+  try { r = await window.runCommand(line); } catch (e) { r = { ok: false, text: String(e) }; }
+  $('cmd-busy').hidden = true; $('cmd').disabled = false; $('cmd').focus();
+  const d = document.createElement('div'); d.className = 'reply' + (r.ok ? '' : ' bad'); d.innerHTML = md(r.text || '(done)');
+  $('log').appendChild(d); trimLog(); follow = true; scrollDown();
+  refreshState(); refreshStocks();
+}
+
+const COMMANDS = ['help', 'status', 'stocks', 'users', 'check', 'screen', 'report ', 'news ', 'suggest', 'arena', 'arena run',
+                  'arena channel ', 'admin channel ', 'as ', 'admin add ',
+                  'admin remove ', 'admin movedb ', 'loglevel ', 'version', 'clear'];
+$('cmd').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const v = $('cmd').value; $('cmd').value = ''; run(v); }
+  else if (e.key === 'ArrowUp') { if (hpos > 0) $('cmd').value = history[--hpos]; e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { hpos = Math.min(history.length, hpos + 1); $('cmd').value = history[hpos] || ''; e.preventDefault(); }
+  else if (e.key === 'Tab') {
+    const v = $('cmd').value.toLowerCase(); const m = COMMANDS.filter(c => c.startsWith(v));
+    if (v && m.length === 1) $('cmd').value = m[0];
+    e.preventDefault();
+  }
+});
+$('b-run').onclick = () => { const v = $('cmd').value; $('cmd').value = ''; run(v); };
+$('b-clear').onclick = () => { $('log').innerHTML = ''; };
+document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-f]').forEach(x => x.classList.toggle('on', x === b));
+  $('log').className = b.dataset.f;
+});
+$('b-toggle').onclick = async () => {
+  const running = state.state === 'online' || state.state === 'starting';
+  $('b-toggle').disabled = true;
+  await (running ? window.stopBot() : window.startBot());
+  setTimeout(refreshState, 300);
+};
+$('b-retry').onclick = () => window.startBot().then(() => setTimeout(refreshState, 300));
+$('b-settings').onclick = $('b-settings2').onclick = () => window.openPath('config');
+$('b-folder').onclick = () => window.openPath('folder');
+$('b-logfile').onclick = () => window.openPath('log');
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && (e.key === '1' || e.key === '2')) {
+    document.querySelector(`[data-tab="${e.key === '1' ? 'stocks' : 'arena'}"]`).click();
+    e.preventDefault();
+    return;
+  }
+  if (e.target.tagName !== 'INPUT' && e.key.length === 1 && !e.ctrlKey) $('cmd').focus();
+});
+
+(async () => {
+  info = await window.serverInfo();
+  $('version').textContent = 'version ' + info.version;
+  $('version').title = 'Settings: ' + info.config_path;
+  $('b-settings').title = 'Open ' + info.config_path;
+  window.__logs(await window.recentLogs());
+  addLine('INFO', 'Console ready. Type "help" for commands.');
+  await refreshState(); await refreshStocks();
+  setInterval(refreshState, 2000);
+  setInterval(refreshStocks, 10000);
+  setInterval(() => { if (!$('tab-arena').hidden) refreshArena(); }, 15000);
+  $('cmd').focus();
+})();
+</script>
+</body>
+</html>

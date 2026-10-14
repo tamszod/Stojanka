@@ -1,0 +1,16 @@
+{
+  "name": "strojanka",
+  "version": "0.1.0",
+  "description": "Discord bot that watches stocks and reports PEAK and SUPPORT levels.",
+  "dependencies": [
+    "dpp",
+    "sqlite3",
+    "nlohmann-json",
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [ "ssl" ]
+    }
+  ],
+  "builtin-baseline": "e456309491fd875487bf02b8a0dca76c1b1b00cc"
+}

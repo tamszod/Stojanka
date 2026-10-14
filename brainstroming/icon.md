@@ -1,0 +1,1 @@
+Create a strojanka icon and use it for the application
