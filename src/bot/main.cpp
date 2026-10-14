@@ -11,6 +11,7 @@
 #include "common/strings.h"
 #include "common/utf8_path.h"
 #include "core/admin_service.h"
+#include "core/politicians/politician_service.h"
 #include "core/arena/arena_service.h"
 #include "core/analysis/walk_forward.h"
 #include "core/commands.h"
@@ -38,6 +39,7 @@ void print_usage() {
               << "  --analyze <SYMBOL> print an analysis report for a stock without starting Discord\n"
               << "  --news <SYMBOL>    print recent headlines with their tone\n"
               << "  --arena            run the trading-bot arena once and print every bot\n"
+              << "  --politicians [name]  check for new US Senate stock trade disclosures and print them\n"
               << "  --move-db <folder> move the database to another folder or drive (bot must be stopped)\n"
               << "  --suggest [buy|sell] screen the stock list now and print the most predictable stocks\n"
               << "  --backtest <SYMBOL> [SYMBOL...]\n"
@@ -122,6 +124,23 @@ int run_analyze(const Config& config, const std::string& config_path, bool have_
 }
 
 // Runs one arena pass (prices, historical tests, live trading) and prints every bot.
+int run_politicians(const Config& config, const std::string& config_path, bool have_config, const std::string& name_filter) {
+    const std::string db_path = have_config ? resolve_config_path(config_path, config.database_path) : ":memory:";
+    Database db(db_path);
+    migrate_database(db, true);
+    Repository repo(db);
+    politicians::SenateEfdClient source;
+    politicians::PoliticianService service(repo, source, config);
+    std::cout << "Checking for new US Senate stock trade disclosures (last 60 days)...\n" << std::flush;
+    const size_t n = service.tick();
+    std::cout << n << " new trade(s) found.\n\n";
+    YahooProvider provider;
+    MonitorService monitor(repo, provider, config);
+    CommandService commands(repo, monitor);
+    std::cout << commands.politicians("cli", name_filter).text << "\n";
+    return 0;
+}
+
 int run_arena(const Config& config, const std::string& config_path, bool have_config) {
     const std::string db_path = have_config ? resolve_config_path(config_path, config.database_path) : ":memory:";
     Database db(db_path);
@@ -204,6 +223,8 @@ int main(int argc, char** argv) {
     std::string news_symbol;
     std::string move_db_folder;
     bool arena_mode = false;
+    std::string politicians_filter;
+    bool politicians_mode = false;
     bool suggest = false;
     bool migrate = false;
     for (int i = 1; i < argc; ++i) {
@@ -214,6 +235,10 @@ int main(int argc, char** argv) {
         else if (arg == "--news" && i + 1 < argc) news_symbol = argv[++i];
         else if (arg == "--move-db" && i + 1 < argc) move_db_folder = argv[++i];
         else if (arg == "--arena") arena_mode = true;
+        else if (arg == "--politicians") {
+            politicians_filter = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
+            politicians_mode = true;
+        }
         else if (arg == "--suggest") {
             suggest_side = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
             suggest = true;
@@ -242,13 +267,14 @@ int main(int argc, char** argv) {
     const auto loaded = load_config(config_path, &error);
     if (loaded) {
         config = *loaded;
-    } else if (explicit_config || (analyze_symbol.empty() && news_symbol.empty() && !suggest && !arena_mode)) {
+    } else if (explicit_config || (analyze_symbol.empty() && news_symbol.empty() && !suggest && !arena_mode && !politicians_mode)) {
         std::cerr << "Could not load configuration: " << error << "\n";
         return 1;
     }
 
     log_set_level(parse_log_level(config.log_level));
-    if (loaded && analyze_symbol.empty() && news_symbol.empty() && move_db_folder.empty() && !suggest && !arena_mode && !migrate &&
+    if (loaded && analyze_symbol.empty() && news_symbol.empty() && move_db_folder.empty() && !suggest && !arena_mode &&
+        !politicians_mode && !migrate &&
         !config.log_file.empty()) {
         log_set_file(resolve_config_path(config_path, config.log_file));
     }
@@ -259,6 +285,7 @@ int main(int argc, char** argv) {
         if (!analyze_symbol.empty()) return run_analyze(config, config_path, loaded.has_value(), analyze_symbol);
         if (!news_symbol.empty()) return run_news(config, config_path, loaded.has_value(), news_symbol);
         if (arena_mode) return run_arena(config, config_path, loaded.has_value());
+        if (politicians_mode) return run_politicians(config, config_path, loaded.has_value(), politicians_filter);
         if (suggest) return run_suggest(config, config_path, loaded.has_value(), suggest_side);
         return run_bot(config_path);
     } catch (const std::exception& e) {

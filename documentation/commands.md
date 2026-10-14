@@ -37,9 +37,16 @@ Compare the two percentages on each line. When the bot's number is not clearly h
 random-day number, the report says **no proven edge yet**, and alerts for that stock should be
 treated as hints only.
 
+## /monitor politician:Pelosi
+Personally watch a politician instead of a stock: you get a direct message the next time they
+disclose a trade. As text: `monitor politician Nancy Pelosi`. See [politician trades](politicians.md).
+
 ## /remove stock:FCX
 Stops watching a stock. If you still own shares of it, the bot refuses and tells you how many
 you have. Record the sale with `/sell` first.
+
+## /remove politician:Pelosi
+Stops watching a politician. As text: `remove politician Nancy Pelosi`.
 
 ## /buy stock:FCX shares:0.858291457 paid:59.78$
 Records a purchase. `paid` is the **total** amount you paid for those shares, not the price per
@@ -118,6 +125,10 @@ strategy, its test on old prices, its live results, what it holds and its latest
 The built-in AI model: how well it did on years it never saw, and today's stocks with the
 highest chance of a rise or a fall. As text: `pythia` or `ai`. See [Pythia](pythia.md).
 
+## /politicians and /politicians name:Pelosi
+Recent US Senate stock trade disclosures: everyone's, or just one politician's. As text:
+`politicians` or `politicians Pelosi`. See [politician trades](politicians.md).
+
 ## /admin (admins only)
 
 Admins look after the bot. **Whoever created the bot in the Discord developer portal is
@@ -128,7 +139,7 @@ automatically an admin.** They can add others, and every admin receives the bot'
 | `/admin status` or `admin` | The admin panel: database location and size, free disk space, number of users, stocks, trades, alerts and stored headlines, the last price check, the news weight, and the admin list. |
 | `/admin add user:@someone` or `admin add <user ID>` | Makes someone an admin. To copy an ID, turn on Developer Mode in Discord, right-click the person and choose **Copy User ID**. |
 | `/admin remove user:@someone` or `admin remove <user ID>` | Removes an admin. The bot's owner can't be removed. |
-| `admin channel <channel ID>` | Sets the Discord channel where public arena bots report their trades. Without an ID, it shows the current channel. |
+| `admin channel <channel ID>` | Sets the Discord channel where public arena bots and politician trade disclosures are posted. Without an ID, it shows the current channel. |
 | `/admin movedb folder:D:\StrojankaData` or `admin movedb D:\StrojankaData` | Moves the database to another folder or drive **while the bot keeps running**. The bot copies the database, checks the copy, switches to it, deletes the old file and updates the settings file. If anything goes wrong, nothing changes. |
 
 **Warnings admins receive** (as direct messages):

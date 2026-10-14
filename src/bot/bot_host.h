@@ -14,6 +14,7 @@
 #include "core/market/yahoo_provider.h"
 #include "core/monitor_service.h"
 #include "core/news/news_provider.h"
+#include "core/politicians/politician_service.h"
 #include "core/repository.h"
 #include "core/screener.h"
 #include "core/server_console.h"
@@ -50,6 +51,7 @@ public:
     AdminService& admin() { return *admin_; }
     ServerConsole& console() { return *console_; }
     arena::ArenaService& arena() { return *arena_; }
+    politicians::PoliticianService& politicians() { return *politicians_; }
 
 private:
     std::string config_path_;
@@ -66,6 +68,8 @@ private:
     std::unique_ptr<AdminService> admin_;
     std::unique_ptr<ml::Pythia> pythia_;
     std::unique_ptr<arena::ArenaService> arena_;
+    std::unique_ptr<politicians::SenateEfdClient> senate_;
+    std::unique_ptr<politicians::PoliticianService> politicians_;
     std::unique_ptr<ServerConsole> console_;
     std::unique_ptr<DiscordBot> bot_;
     std::mutex wait_mutex_;

@@ -117,7 +117,7 @@ std::string AdminService::status_text() {
         const bool owner = std::find(owners.begin(), owners.end(), all[i]) != owners.end();
         m << (i ? ", " : "") << "<@" << all[i] << ">" << (owner ? " (owner)" : "");
     }
-    const std::string channel = repo_.meta(arena::kChannelKey);
+    const std::string channel = repo_.meta(kPublicChannelKey);
     m << "\n**Arena channel:** " << (channel.empty() ? "not set (public bots cannot report)" : "<#" + channel + ">");
     m << "\n\n`admin add <user ID>` | `admin remove <user ID>` | `admin movedb <folder>` | `admin channel <channel ID>`";
     return m.str();
@@ -212,15 +212,17 @@ CommandReply AdminService::run(const std::string& user, const std::vector<std::s
         std::string text = rest();
         text.erase(std::remove_if(text.begin(), text.end(), [](char c) { return c == '<' || c == '>' || c == '#'; }), text.end());
         if (trim(text).empty()) {
-            const std::string current = repo_.meta(arena::kChannelKey);
-            return {true, current.empty() ? "No arena channel is set, so public bots cannot report yet. Set one with "
-                                            "`admin channel <channel ID>` (Developer Mode on, right-click the channel, Copy Channel ID)."
-                                          : "Public arena bots report in <#" + current + ">."};
+            const std::string current = repo_.meta(kPublicChannelKey);
+            return {true, current.empty() ? "No public channel is set, so arena bots and politician trades cannot report yet. "
+                                            "Set one with `admin channel <channel ID>` (Developer Mode on, right-click the "
+                                            "channel, Copy Channel ID)."
+                                          : "Public arena bots and politician trades report in <#" + current + ">."};
         }
         const std::string id = parse_user_id(text);  // channel IDs look the same as user IDs
         if (id.empty()) return {false, "Give a channel ID, for example `admin channel 1328815839423758388`."};
-        repo_.set_meta(arena::kChannelKey, id);
-        return {true, "Public arena bots will report in <#" + id + ">. The bot needs permission to send messages there."};
+        repo_.set_meta(kPublicChannelKey, id);
+        return {true, "Public arena bots and politician trades will report in <#" + id + ">. The bot needs permission to "
+                      "send messages there."};
     }
     return {false, "Admin commands: `admin`, `admin add <user ID>`, `admin remove <user ID>`, `admin list`, "
                    "`admin movedb <folder>`, `admin channel <channel ID>`."};

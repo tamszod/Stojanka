@@ -125,6 +125,25 @@ struct ArenaTradeRecord {
     bool is_public = false;  // announced in Discord
 };
 
+// One politician stock trade, stored exactly as disclosed (see core/politicians/senate_efd.h
+// for where this comes from and its limits).
+struct PoliticianTradeRecord {
+    int64_t id = 0;
+    std::string chamber;  // "Senate" today; "House" once PDF parsing exists
+    std::string first_name, last_name, office;
+    std::string report_id;
+    int item_number = 0;
+    std::string filed_date, transaction_date;
+    std::string owner, ticker, asset_name, asset_type, transaction_type;
+    double amount_min = 0;
+    std::optional<double> amount_max;
+    std::string comment;
+    std::string fetched_at;
+    bool is_public = false;
+
+    std::string full_name() const { return first_name + " " + last_name; }
+};
+
 // One stock checked by the screener. *_edge = conservative lower bound of the hit rate
 // (Wilson, 90%) minus the random-day baseline; above 0 means "beats chance even when skeptical".
 struct ScreenResult {

@@ -28,10 +28,15 @@ dpp::command_option stock_option(bool required) {
     return dpp::command_option(dpp::co_string, "stock", "Ticker symbol, for example FCX", required);
 }
 
+dpp::command_option politician_option() {
+    return dpp::command_option(dpp::co_string, "politician", "A politician's name instead of a stock, for example Pelosi", false);
+}
+
 }  // namespace
 
 DiscordBot::DiscordBot(const Config& config, Repository& repo, MonitorService& monitor, CommandService& commands,
-                       Screener& screener, AdminService& admin, arena::ArenaService& arena)
+                       Screener& screener, AdminService& admin, arena::ArenaService& arena,
+                       politicians::PoliticianService& politicians)
     : config_(config),
       repo_(repo),
       monitor_(monitor),
@@ -39,6 +44,7 @@ DiscordBot::DiscordBot(const Config& config, Repository& repo, MonitorService& m
       screener_(screener),
       admin_(admin),
       arena_(arena),
+      politicians_(politicians),
       cluster_(config.discord_token, dpp::i_default_intents),
       workers_(4) {
     cluster_.on_log([](const dpp::log_t& event) {
@@ -63,8 +69,11 @@ DiscordBot::DiscordBot(const Config& config, Repository& repo, MonitorService& m
             monitor_.set_notifier(this);
             monitor_.start();
             screener_.start();
-            arena_.set_announcer([this](const std::string& message) { post_to_arena_channel(message); });
+            arena_.set_announcer([this](const std::string& message) { post_to_public_channel(message); });
             arena_.start();
+            politicians_.set_announcer([this](const std::string& message) { post_to_public_channel(message); });
+            politicians_.set_notifier(this);
+            politicians_.start();
             load_owners();
             cluster_.start_timer([this](dpp::timer) { workers_.submit([this] { admin_.check_health(*this); }); }, 3600);
         }
@@ -74,6 +83,9 @@ DiscordBot::DiscordBot(const Config& config, Repository& repo, MonitorService& m
 }
 
 DiscordBot::~DiscordBot() {
+    politicians_.stop();
+    politicians_.set_announcer({});
+    politicians_.set_notifier(nullptr);
     arena_.stop();
     arena_.set_announcer({});
     screener_.stop();
@@ -110,7 +122,7 @@ void DiscordBot::load_owners() {
     });
 }
 
-void DiscordBot::post_to_arena_channel(const std::string& message) {
+void DiscordBot::post_to_public_channel(const std::string& message) {
     const std::string channel = arena_.channel_id();
     if (channel.empty()) {
         log_warn("arena: no public channel set (admin channel <channel ID>), message not posted: " + message.substr(0, 80));
@@ -138,13 +150,19 @@ void DiscordBot::register_commands() {
     profit.add_option(stock_option(false));
     cmds.push_back(profit);
 
-    dpp::slashcommand monitor("monitor", "Start watching a stock", app);
-    monitor.add_option(stock_option(true));
+    dpp::slashcommand monitor("monitor", "Start watching a stock, or a politician's disclosed trades", app);
+    monitor.add_option(stock_option(false));
+    monitor.add_option(politician_option());
     cmds.push_back(monitor);
 
-    dpp::slashcommand remove("remove", "Stop watching a stock (only if you hold no shares)", app);
-    remove.add_option(stock_option(true));
+    dpp::slashcommand remove("remove", "Stop watching a stock (only if you hold no shares) or a politician", app);
+    remove.add_option(stock_option(false));
+    remove.add_option(politician_option());
     cmds.push_back(remove);
+
+    dpp::slashcommand politicians("politicians", "Recent US Senate stock trades; empty for everyone", app);
+    politicians.add_option(dpp::command_option(dpp::co_string, "name", "Only trades matching this name", false));
+    cmds.push_back(politicians);
 
     dpp::slashcommand buy("buy", "Record shares you bought", app);
     buy.add_option(stock_option(true));
@@ -235,6 +253,8 @@ void DiscordBot::on_command(const dpp::slashcommand_t& event) {
     };
     // `side` (suggest) and `bot` (arena) travel in the stock slot.
     const std::string stock = name == "suggest" ? param("side") : name == "arena" ? param("bot") : param("stock");
+    // `name` (politicians) and `politician` (monitor/remove) travel in the same slot.
+    const std::string politician = name == "politicians" ? param("name") : param("politician");
     const std::string shares = param("shares");
     const std::string amount = name == "sell" ? param("received") : param("paid");
     const std::string token = event.command.token;
@@ -257,16 +277,16 @@ void DiscordBot::on_command(const dpp::slashcommand_t& event) {
 
     // Replies are private (ephemeral): portfolios are personal. Work runs off the gateway
     // thread because some commands download price history.
-    event.thinking(true, [this, name, user, channel, stock, shares, amount, token, admin_args](const dpp::confirmation_callback_t& ack) {
+    event.thinking(true, [this, name, user, channel, stock, politician, shares, amount, token, admin_args](const dpp::confirmation_callback_t& ack) {
         if (ack.is_error()) {
             log_warn("could not acknowledge /" + name + ": " + ack.get_error().message);
             return;
         }
-        workers_.submit([this, name, user, channel, stock, shares, amount, token, admin_args] {
+        workers_.submit([this, name, user, channel, stock, politician, shares, amount, token, admin_args] {
             CommandReply reply;
             try {
                 repo_.ensure_user(user, channel);
-                reply = dispatch(name, user, stock, shares, amount, admin_args);
+                reply = dispatch(name, user, stock, politician, shares, amount, admin_args);
             } catch (const std::exception& e) {
                 log_error("/" + name + " failed: " + e.what());
                 reply = {false, "Something went wrong while running this command. The error was logged."};
@@ -277,14 +297,18 @@ void DiscordBot::on_command(const dpp::slashcommand_t& event) {
 }
 
 CommandReply DiscordBot::dispatch(const std::string& name, const std::string& user, const std::string& stock,
-                                  const std::string& shares, const std::string& amount,
+                                  const std::string& politician, const std::string& shares, const std::string& amount,
                                   const std::vector<std::string>& admin_args) {
     if (name == "admin") return commands_.admin(user, admin_args);
     if (name == "help") return commands_.help();
     if (name == "status") return commands_.status(user);
     if (name == "profit") return commands_.profit(user, stock);
-    if (name == "monitor") return commands_.monitor(user, stock);
-    if (name == "remove") return commands_.remove(user, stock);
+    if (name == "monitor" || name == "remove") {
+        if (!stock.empty() && !politician.empty()) return {false, "Give either a stock or a politician, not both."};
+        if (stock.empty() && politician.empty()) return {false, "Give a stock ticker or a politician's name."};
+        if (name == "monitor") return politician.empty() ? commands_.monitor(user, stock) : commands_.monitor_politician(user, politician);
+        return politician.empty() ? commands_.remove(user, stock) : commands_.remove_politician(user, politician);
+    }
     if (name == "buy") return commands_.buy(user, stock, shares, amount);
     if (name == "sell") return commands_.sell(user, stock, shares, amount);
     if (name == "report") return commands_.report(user, stock);
@@ -292,6 +316,7 @@ CommandReply DiscordBot::dispatch(const std::string& name, const std::string& us
     if (name == "news") return commands_.news(user, stock);
     if (name == "arena") return commands_.arena(user, stock);
     if (name == "pythia") return commands_.pythia(user);
+    if (name == "politicians") return commands_.politicians(user, politician);
     return {false, "Unknown command."};
 }
 

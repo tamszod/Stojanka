@@ -2,7 +2,7 @@
 
 SQLite, one file (default `<install>/data/strojanka.db`, path in `strojanka.conf: database_path`).
 Opened with WAL journal (so `-wal`/`-shm` side files appear while running), foreign keys on.
-Schema version = `PRAGMA user_version`. Current: **6** (`src/core/migrations.cpp`; v2 = `screen_results`; v3 = `news_items`, `signals.news_sentiment`, `stocks.news_fetched_at`; v4 = `admins`; v5 = arena tables; v6 = `ml_models`).
+Schema version = `PRAGMA user_version`. Current: **7** (`src/core/migrations.cpp`; v2 = `screen_results`; v3 = `news_items`, `signals.news_sentiment`, `stocks.news_fetched_at`; v4 = `admins`; v5 = arena tables; v6 = `ml_models`; v7 = `politician_trades`, `politician_watch`).
 Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → integrity_check → swap handle under the mutex → delete old db/-wal/-shm); `AdminService::move_database` also rewrites `database_path` in strojanka.conf.
 
 ## Migration rules
@@ -14,7 +14,7 @@ Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → i
 ## Tables (v1)
 | Table | Purpose | Written by | Notes |
 |---|---|---|---|
-| `app_meta(key PK, value)` | misc metadata | migrations | `schema_migrated_at` |
+| `app_meta(key PK, value)` | misc metadata | migrations | `schema_migrated_at`; `arena_channel_id` (`AdminService::kPublicChannelKey` — shared public channel for arena *and* politician announcements, legacy key name kept for compatibility); `politicians_last_run` |
 | `users(discord_id PK, notify_channel_id, created_at)` | one row per Discord user | `Repository::ensure_user` on every command | channel = fallback when DMs fail |
 | `stocks(symbol PK, name, currency, exchange, category, trend, last_price, last_price_at, support_level, resistance_level, peak_score, support_score, profile_json, history_full_refresh_at, created_at, updated_at)` | latest state per symbol (shared by all users) | `MonitorService::refresh` | `trend` ∈ increasing/decreasing/stagnating; `category` = `category_name()` text |
 | `price_history(symbol, bar_date, open, high, low, close, volume) PK(symbol,bar_date) WITHOUT ROWID` | daily adjusted bars, up to 10y | `upsert_bars` | adjusted by Yahoo adjclose; full refetch daily keeps adjustments consistent |
@@ -29,6 +29,8 @@ Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → i
 | `arena_positions(bot, symbol, shares, cost, entry_date)`, `arena_orders(bot, symbol, buy)` (v5) | live portfolio and orders waiting for the next open | `save_arena_state` (replaces both per bot in one transaction) | `reset_arena_portfolio` clears them when a bot starts proving |
 | `arena_trades(id, bot, symbol, buy, shares, price, value, profit, trade_date, public)`, `arena_equity(bot, day, value)` (v5) | live fills and daily closing values | `save_arena_state` | equity drives live return, drawdown, vs-Atlas and promotion |
 | `ml_models(name PK, model_json, report_json, trained_at)` (v6) | trained AI models; `pythia` row = {up, down trees, recent market context} + walk-forward report | `Pythia::train` → `save_model`; `Pythia::load` at BotHost start | a few MB of JSON |
+| `politician_trades(id, chamber, first_name, last_name, office, filed_date, report_id, item_number, transaction_date, owner, ticker, asset_name, asset_type, transaction_type, amount_min, amount_max, has_amount_max, comment, fetched_at, is_public) UNIQUE(report_id,item_number)` (v7) | every parsed Senate PTR transaction, deduplicated | `PoliticianService::tick` → `add_politician_trades` (INSERT OR IGNORE, only newly-inserted rows returned with `id` set) | `has_amount_max` flags an open-ended range ("Over $50,000,000") since SQLite has no nullable-REAL marker; index on `(last_name, first_name)` |
+| `politician_watch(discord_id, politician) PK(discord_id,politician)` (v7) | personal watch, mirrors `watchlist` | `monitor politician:<name>` / `remove politician:<name>` | name stored lower-cased/trimmed; `politician_watchers(name)` looks up who to DM |
 | `notifications(id, signal_id→signals, discord_id, message, delivered, error, created_at)` | delivery log per user | `emit`, `DiscordBot::send` callback | |
 
 ## Handy queries

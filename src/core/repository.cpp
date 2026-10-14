@@ -587,6 +587,123 @@ std::optional<std::array<std::string, 3>> Repository::load_model(const std::stri
     return std::array<std::string, 3>{st.text(0), st.text(1), st.text(2)};
 }
 
+std::vector<PoliticianTradeRecord> Repository::add_politician_trades(const std::vector<PoliticianTradeRecord>& trades) {
+    std::vector<PoliticianTradeRecord> added;
+    SqlTransaction tx(db_);
+    auto st = db_.prepare(
+        "INSERT OR IGNORE INTO politician_trades(chamber, first_name, last_name, office, report_id, item_number, "
+        "filed_date, transaction_date, owner, ticker, asset_name, asset_type, transaction_type, amount_min, "
+        "amount_max, has_amount_max, comment, fetched_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18);");
+    for (auto t : trades) {
+        st.reset();
+        st.bind(1, t.chamber).bind(2, t.first_name).bind(3, t.last_name).bind(4, t.office);
+        st.bind(5, t.report_id).bind(6, t.item_number).bind(7, t.filed_date).bind(8, t.transaction_date);
+        st.bind(9, t.owner).bind(10, t.ticker).bind(11, t.asset_name).bind(12, t.asset_type).bind(13, t.transaction_type);
+        st.bind(14, t.amount_min).bind(15, t.amount_max.value_or(0)).bind(16, t.amount_max.has_value() ? 1 : 0);
+        st.bind(17, t.comment).bind(18, t.fetched_at);
+        st.step();
+        if (db_.changes() > 0) {
+            t.id = db_.last_insert_id();
+            added.push_back(t);
+        }
+    }
+    tx.commit();
+    return added;
+}
+
+bool Repository::has_politician_filing(const std::string& report_id) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT 1 FROM politician_trades WHERE report_id = ?1 LIMIT 1;");
+    st.bind(1, report_id);
+    return st.step();
+}
+
+void Repository::mark_politician_trade_public(int64_t id) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("UPDATE politician_trades SET public = 1 WHERE id = ?1;");
+    st.bind(1, id);
+    st.step();
+}
+
+namespace {
+PoliticianTradeRecord read_politician_trade(Statement& st) {
+    PoliticianTradeRecord t;
+    t.id = st.integer(0);
+    t.chamber = st.text(1);
+    t.first_name = st.text(2);
+    t.last_name = st.text(3);
+    t.office = st.text(4);
+    t.report_id = st.text(5);
+    t.item_number = static_cast<int>(st.integer(6));
+    t.filed_date = st.text(7);
+    t.transaction_date = st.text(8);
+    t.owner = st.text(9);
+    t.ticker = st.text(10);
+    t.asset_name = st.text(11);
+    t.asset_type = st.text(12);
+    t.transaction_type = st.text(13);
+    t.amount_min = st.real(14);
+    if (st.integer(16) != 0) t.amount_max = st.real(15);
+    t.comment = st.text(17);
+    t.fetched_at = st.text(18);
+    t.is_public = st.integer(19) != 0;
+    return t;
+}
+constexpr const char* kPoliticianTradeColumns =
+    "id, chamber, first_name, last_name, office, report_id, item_number, filed_date, transaction_date, owner, "
+    "ticker, asset_name, asset_type, transaction_type, amount_min, amount_max, has_amount_max, comment, fetched_at, public";
+}  // namespace
+
+std::vector<PoliticianTradeRecord> Repository::recent_politician_trades(const std::string& name_filter, int limit) {
+    Lock lock(db_.mutex());
+    std::string sql = std::string("SELECT ") + kPoliticianTradeColumns + " FROM politician_trades";
+    if (!name_filter.empty()) sql += " WHERE lower(first_name || ' ' || last_name) LIKE ?1";
+    sql += " ORDER BY id DESC LIMIT ?" + std::to_string(name_filter.empty() ? 1 : 2) + ";";
+    auto st = db_.prepare(sql);
+    if (!name_filter.empty()) st.bind(1, "%" + to_lower(name_filter) + "%").bind(2, limit);
+    else st.bind(1, limit);
+    std::vector<PoliticianTradeRecord> out;
+    while (st.step()) out.push_back(read_politician_trade(st));
+    return out;
+}
+
+std::vector<std::string> Repository::known_politician_names() {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare(
+        "SELECT first_name || ' ' || last_name AS name FROM politician_trades GROUP BY name ORDER BY COUNT(*) DESC;");
+    return collect_strings(st);
+}
+
+bool Repository::add_politician_watch(const std::string& user_id, const std::string& politician) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("INSERT OR IGNORE INTO politician_watch(discord_id, politician, added_at) VALUES (?1,?2,?3);");
+    st.bind(1, user_id).bind(2, politician).bind(3, utc_now_iso());
+    st.step();
+    return db_.changes() > 0;
+}
+
+bool Repository::remove_politician_watch(const std::string& user_id, const std::string& politician) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("DELETE FROM politician_watch WHERE discord_id = ?1 AND politician = ?2;");
+    st.bind(1, user_id).bind(2, politician);
+    st.step();
+    return db_.changes() > 0;
+}
+
+std::vector<std::string> Repository::user_politician_watchlist(const std::string& user_id) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT politician FROM politician_watch WHERE discord_id = ?1 ORDER BY added_at;");
+    st.bind(1, user_id);
+    return collect_strings(st);
+}
+
+std::vector<std::string> Repository::politician_watchers(const std::string& politician) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT discord_id FROM politician_watch WHERE politician = ?1;");
+    st.bind(1, politician);
+    return collect_strings(st);
+}
+
 void Repository::replace_screen_results(const std::vector<ScreenResult>& results) {
     SqlTransaction tx(db_);
     db_.exec("DELETE FROM screen_results;");

@@ -33,6 +33,8 @@
 #include "core/log.h"
 #include "core/ml/gbdt.h"
 #include "core/ml/pythia.h"
+#include "core/politicians/politician_service.h"
+#include "core/politicians/senate_efd.h"
 #include "core/server_console.h"
 #include "core/news/news_provider.h"
 #include "core/news/sentiment.h"
@@ -890,6 +892,256 @@ void test_pythia(const fs::path& dir) {
     CHECK(ml::Pythia::feature_names().size() == with_future[1499].size());
 }
 
+void test_senate_efd_parser() {
+    using namespace politicians;
+    // A realistic electronic PTR transaction table: header matches by name, includes HTML
+    // entities, a closed amount range and an open-ended one, and sits among unrelated markup
+    // (a nav table before it) to check the table-selection logic doesn't grab the wrong one.
+    const std::string html = R"HTML(
+<html><body>
+<table class="nav"><tr><td>Home</td><td>Search</td></tr></table>
+<div class="filing">
+<h1>Jane Q. Senator</h1>
+<table class="table">
+<thead><tr><th>#</th><th>Transaction Date</th><th>Owner</th><th>Ticker</th><th>Asset Name</th>
+<th>Asset Type</th><th>Type</th><th>Amount</th><th>Comment</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>03/14/2026</td><td>Self</td><td>AAPL</td><td>Apple Inc. &amp; Co.</td>
+<td>Stock</td><td>Purchase</td><td>$1,001 - $15,000</td><td></td></tr>
+<tr><td>2</td><td>03/15/2026</td><td>Spouse</td><td>--</td><td>Big Fund XYZ</td>
+<td>Municipal Security</td><td>Sale (Partial)</td><td>Over $50,000,000</td><td>see note</td></tr>
+</tbody>
+</table>
+</div>
+</body></html>
+)HTML";
+    const auto trades = parse_transaction_table(html, "abc123");
+    CHECK(trades.size() == 2);
+    if (trades.size() != 2) return;
+    CHECK(trades[0].report_id == "abc123");
+    CHECK(trades[0].item_number == 1);
+    CHECK(trades[0].transaction_date == "2026-03-14");
+    CHECK(trades[0].owner == "Self");
+    CHECK(trades[0].ticker == "AAPL");
+    CHECK(trades[0].asset_name == "Apple Inc. & Co.");  // entity decoded
+    CHECK(trades[0].transaction_type == "Purchase");
+    CHECK_NEAR(trades[0].amount_min, 1001, 1e-9);
+    CHECK(trades[0].amount_max.has_value() && std::fabs(*trades[0].amount_max - 15000) < 1e-9);
+
+    CHECK(trades[1].item_number == 2);
+    CHECK(trades[1].owner == "Spouse");
+    CHECK(trades[1].transaction_type == "Sale (Partial)");
+    CHECK(trades[1].comment == "see note");
+    CHECK_NEAR(trades[1].amount_min, 50000000, 1e-6);
+    CHECK(!trades[1].amount_max.has_value());  // open-ended range
+
+    // A table with none of the recognizable headers and fewer than 8 columns in its first
+    // body row should be rejected entirely rather than misread as transactions.
+    const std::string junk = "<html><table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table></html>";
+    CHECK(parse_transaction_table(junk, "x").empty());
+
+    // The 9-column built-in header list kicks in when the real header row is too short.
+    const std::string short_header =
+        "<table><tr><th>Col</th></tr>"
+        "<tr><td>1</td><td>01/02/2026</td><td>Self</td><td>MSFT</td><td>Microsoft</td><td>Stock</td><td>Purchase</td>"
+        "<td>$1,001 - $15,000</td><td></td></tr></table>";
+    const auto fallback = parse_transaction_table(short_header, "y");
+    CHECK(fallback.size() == 1);
+    if (!fallback.empty()) {
+        CHECK(fallback[0].ticker == "MSFT");
+        CHECK(fallback[0].transaction_date == "2026-01-02");
+    }
+}
+
+PoliticianTradeRecord make_senate_trade(const std::string& first, const std::string& last, const std::string& report_id,
+                                        int item, const std::string& ticker, double amount_min) {
+    PoliticianTradeRecord r;
+    r.chamber = "Senate";
+    r.first_name = first;
+    r.last_name = last;
+    r.office = "Senator";
+    r.report_id = report_id;
+    r.item_number = item;
+    r.filed_date = "2026-10-01";
+    r.transaction_date = "2026-09-15";
+    r.owner = "Self";
+    r.ticker = ticker;
+    r.asset_name = ticker + " Inc.";
+    r.asset_type = "Stock";
+    r.transaction_type = "Purchase";
+    r.amount_min = amount_min;
+    r.amount_max = amount_min * 10;
+    r.fetched_at = utc_now_iso();
+    return r;
+}
+
+void test_politician_repository(const fs::path& dir) {
+    Database db(path_utf8(dir / "politicians.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+
+    const auto added = repo.add_politician_trades(
+        {make_senate_trade("Jane", "Doe", "rep1", 1, "AAPL", 1001), make_senate_trade("Jane", "Doe", "rep1", 2, "MSFT", 15001)});
+    CHECK(added.size() == 2);
+    CHECK(added[0].id > 0 && added[1].id > added[0].id);
+
+    // Re-adding the same (report_id, item_number) is silently ignored, not duplicated.
+    const auto readded = repo.add_politician_trades({make_senate_trade("Jane", "Doe", "rep1", 1, "AAPL", 1001)});
+    CHECK(readded.empty());
+    CHECK(repo.recent_politician_trades("", 100).size() == 2);
+
+    CHECK(repo.has_politician_filing("rep1"));
+    CHECK(!repo.has_politician_filing("rep-unseen"));
+
+    repo.add_politician_trades({make_senate_trade("John", "Smith", "rep2", 1, "KO", 50000)});
+    CHECK(repo.recent_politician_trades("", 100).size() == 3);
+    const auto filtered = repo.recent_politician_trades("jane", 100);
+    CHECK(filtered.size() == 2);
+    CHECK(repo.recent_politician_trades("nobody", 100).empty());
+    const auto names = repo.known_politician_names();
+    CHECK(names.size() == 2);
+
+    repo.mark_politician_trade_public(added[0].id);
+    const auto after_mark = repo.recent_politician_trades("jane", 100);
+    CHECK(std::any_of(after_mark.begin(), after_mark.end(), [&](const PoliticianTradeRecord& t) { return t.id == added[0].id && t.is_public; }));
+
+    CHECK(repo.add_politician_watch("u1", "jane doe"));
+    CHECK(!repo.add_politician_watch("u1", "jane doe"));  // already watching
+    CHECK(repo.add_politician_watch("u2", "jane doe"));
+    CHECK(repo.add_politician_watch("u1", "john smith"));
+    CHECK(repo.user_politician_watchlist("u1").size() == 2);
+    const auto watchers = repo.politician_watchers("jane doe");
+    CHECK(watchers.size() == 2);
+    CHECK(repo.remove_politician_watch("u1", "jane doe"));
+    CHECK(!repo.remove_politician_watch("u1", "jane doe"));
+    CHECK(repo.politician_watchers("jane doe").size() == 1);
+}
+
+class FakeSenateSource : public politicians::SenateSource {
+public:
+    bool start_ok = true;
+    std::string start_error;
+    std::vector<politicians::FilingRef> filings;
+    std::map<std::string, std::vector<politicians::SenateTrade>> trades_by_report;
+    int start_calls = 0, list_calls = 0, fetch_calls = 0;
+
+    bool start(std::string* error) override {
+        ++start_calls;
+        if (!start_ok && error) *error = start_error;
+        return start_ok;
+    }
+    std::vector<politicians::FilingRef> list_filings(const std::string&, const std::string&, std::string*) override {
+        ++list_calls;
+        return filings;
+    }
+    std::vector<politicians::SenateTrade> fetch_filing(const politicians::FilingRef& ref, std::string*) override {
+        ++fetch_calls;
+        const auto it = trades_by_report.find(ref.report_id);
+        return it == trades_by_report.end() ? std::vector<politicians::SenateTrade>{} : it->second;
+    }
+};
+
+void test_politician_service(const fs::path& dir) {
+    using namespace politicians;
+    Database db(path_utf8(dir / "politician_service.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    Config config;
+    FakeSenateSource source;
+
+    FilingRef electronic;
+    electronic.first_name = "Jane";
+    electronic.last_name = "Doe";
+    electronic.office = "Senator (DE)";
+    electronic.filed_date = "2026-10-01";
+    electronic.report_id = "elec-1";
+    electronic.url = "https://efdsearch.senate.gov/search/view/ptr/elec-1/";
+    electronic.electronic = true;
+    FilingRef paper;
+    paper.first_name = "Old";
+    paper.last_name = "Timer";
+    paper.report_id = "paper-1";
+    paper.electronic = false;
+    source.filings = {electronic, paper};
+
+    SenateTrade t;
+    t.report_id = "elec-1";
+    t.item_number = 1;
+    t.transaction_date = "2026-09-20";
+    t.owner = "Self";
+    t.ticker = "AAPL";
+    t.asset_name = "Apple Inc.";
+    t.transaction_type = "Purchase";
+    t.amount_min = 1001;
+    t.amount_max = 15000;
+    source.trades_by_report["elec-1"] = {t};
+
+    PoliticianService service(repo, source, config);
+    std::vector<std::string> announced;
+    std::vector<std::pair<std::string, std::string>> dmed;
+    service.set_announcer([&](const std::string& m) { announced.push_back(m); });
+    class TestNotifier : public Notifier {
+    public:
+        std::vector<std::pair<std::string, std::string>>* dmed;
+        void send(int64_t, const std::string&, const std::string&) override {}
+        void send_direct(const std::string& user, const std::string& message) override { dmed->emplace_back(user, message); }
+    } notifier;
+    notifier.dmed = &dmed;
+    service.set_notifier(&notifier);
+
+    repo.add_politician_watch("watcher1", "jane doe");
+
+    CHECK(service.tick() == 1);
+    CHECK(source.start_calls == 1 && source.list_calls == 1 && source.fetch_calls == 1);  // paper filing never fetched
+    CHECK(announced.size() == 1);
+    CHECK(announced[0].find("Jane Doe") != std::string::npos);
+    CHECK(announced[0].find("AAPL") != std::string::npos);
+    CHECK(dmed.size() == 1 && dmed[0].first == "watcher1");
+    CHECK(repo.recent_politician_trades("", 10).size() == 1);
+    CHECK(repo.recent_politician_trades("", 10).front().is_public);
+
+    // Running again does not re-fetch the already-ingested filing, and announces nothing new.
+    CHECK(service.tick() == 0);
+    CHECK(source.fetch_calls == 1);
+    CHECK(announced.size() == 1);
+
+    // A failed handshake (e.g. the Akamai block) is handled gracefully, not thrown.
+    FakeSenateSource failing;
+    failing.start_ok = false;
+    failing.start_error = "HTTP 403";
+    PoliticianService failing_service(repo, failing, config);
+    CHECK(failing_service.tick() == 0);
+}
+
+void test_politician_commands(const fs::path& dir) {
+    Database db(path_utf8(dir / "politician_commands.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    FakeProvider provider;
+    Config config;
+    MonitorService monitor(repo, provider, config);
+    CommandService cmd(repo, monitor);
+
+    CHECK(cmd.run_text("u1", "politicians").text.find("No politician trades") != std::string::npos);
+    repo.add_politician_trades({make_senate_trade("Jane", "Doe", "rep1", 1, "AAPL", 1001)});
+    const auto listing = cmd.run_text("u1", "politicians");
+    CHECK(listing.ok && listing.text.find("Jane Doe") != std::string::npos && listing.text.find("AAPL") != std::string::npos);
+    CHECK(cmd.run_text("u1", "politicians Smith").text.find("No disclosed trades") != std::string::npos);
+
+    CHECK(!cmd.run_text("u1", "monitor politician").ok);  // missing name
+    const auto watch = cmd.run_text("u1", "monitor politician Jane Doe");
+    CHECK(watch.ok && watch.text.find("Jane Doe") != std::string::npos);
+    CHECK(cmd.run_text("u1", "monitor politician Jane Doe").text.find("already watching") != std::string::npos);
+    CHECK(repo.user_politician_watchlist("u1") == std::vector<std::string>{"jane doe"});
+    CHECK(cmd.run_text("u1", "remove politician Jane Doe").ok);
+    CHECK(!cmd.run_text("u1", "remove politician Jane Doe").ok);  // not watching anymore
+
+    // A plain stock symbol must still go through the normal /monitor path, unaffected.
+    provider.bars = make_bars(cyclical_closes(200, 2));
+    CHECK(cmd.run_text("u1", "monitor FCX").ok);
+    CHECK(repo.is_watching("u1", "FCX"));
+}
+
 void test_payload(const fs::path& dir) {
     const fs::path stage = dir / "stage";
     fs::create_directories(stage / "docs");
@@ -932,6 +1184,10 @@ int main() {
         {"arena service: stages, promotion, demotion", [&] { test_arena_service(dir); }},
         {"gbdt learner", test_gbdt},
         {"pythia: walk-forward, no peeking, save/load", [&] { test_pythia(dir); }},
+        {"senate EFD transaction table parser", test_senate_efd_parser},
+        {"politician trade repository", [&] { test_politician_repository(dir); }},
+        {"politician service: fetch, dedup, announce, DM", [&] { test_politician_service(dir); }},
+        {"politician commands: monitor/remove/list", [&] { test_politician_commands(dir); }},
         {"payload", [&] { test_payload(dir); }},
     };
     for (const auto& [name, fn] : tests) {

@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.21)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STROJANKA_VERSION_RAW)
 string(STRIP "${STROJANKA_VERSION_RAW}" STROJANKA_VERSION)
 project(Strojanka VERSION ${STROJANKA_VERSION} LANGUAGES C CXX)
+# file(READ) above does not register VERSION as a reconfigure dependency on its own, so an
+# incremental build could keep embedding a stale version after a plain VERSION bump.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +39,7 @@ set(STROJANKA_COMMON_SOURCES
   src/common/platform.cpp
   src/common/instance_lock.cpp
   src/common/crash_handler.cpp
+  src/common/html.cpp
 )
 
 # Turns a file into a byte-array header (used for the HTML interfaces of the installer and server).
@@ -68,6 +72,8 @@ add_library(strojanka_core STATIC
   src/core/arena/arena_service.cpp
   src/core/ml/gbdt.cpp
   src/core/ml/pythia.cpp
+  src/core/politicians/senate_efd.cpp
+  src/core/politicians/politician_service.cpp
   src/core/http.cpp
   src/core/news/sentiment.cpp
   src/core/news/news_provider.cpp

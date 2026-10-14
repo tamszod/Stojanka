@@ -13,6 +13,11 @@
 
 namespace strojanka {
 
+// app_meta key holding the Discord channel where public bot/politician-trade reports go. Kept
+// as "arena_channel_id" in storage since that's what existing installs already have saved;
+// it now means "the public announcements channel" more broadly, not just the arena.
+inline constexpr const char* kPublicChannelKey = "arena_channel_id";
+
 // The `admin` command and the bot's own health checks. Admins are the owner(s) of the Discord
 // application (detected automatically) plus anyone they add. Admins receive warnings such as
 // low disk space, and can move the database to another folder or drive while the bot runs.

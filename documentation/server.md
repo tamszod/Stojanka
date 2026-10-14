@@ -42,6 +42,9 @@ without being a Discord admin.
 | `arena Diana` | One bot in detail |
 | `arena run` | Trade and re-judge the bots right now, instead of waiting for the hourly pass |
 | `arena channel <channel ID>` | The Discord channel where public bots report |
+| `politicians`, `politicians Pelosi` | Recent US Senate stock trades, everyone's or one politician's |
+| `politicians run` | Check for new Senate filings right now, instead of waiting for the daily pass |
+| `politicians channel <channel ID>` | Same shared public channel as `arena channel` |
 | `admin add <user ID>`, `admin remove <user ID>` | Manage admins |
 | `admin movedb <folder>` | Move the database to another folder or drive while running |
 | `loglevel debug\|info\|warn\|error` | How much the console shows (until the next restart) |

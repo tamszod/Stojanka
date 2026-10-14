@@ -88,6 +88,22 @@ public:
     void save_model(const std::string& name, const std::string& model_json, const std::string& report_json);
     std::optional<std::array<std::string, 3>> load_model(const std::string& name);
 
+    // politician trades
+    // Inserts new trades (ignoring ones already stored, by report_id+item_number) and returns
+    // only the ones that were actually new, with their assigned id -- so a caller can announce
+    // or notify about exactly those, never ones already seen on an earlier run.
+    std::vector<PoliticianTradeRecord> add_politician_trades(const std::vector<PoliticianTradeRecord>& trades);
+    bool has_politician_filing(const std::string& report_id);  // true if any trade from it is stored
+    void mark_politician_trade_public(int64_t id);
+    // name_filter: "" for everyone, otherwise a case-insensitive substring of "First Last".
+    std::vector<PoliticianTradeRecord> recent_politician_trades(const std::string& name_filter, int limit);
+    std::vector<std::string> known_politician_names();  // distinct "First Last", most active first
+
+    bool add_politician_watch(const std::string& user_id, const std::string& politician);     // false if already watched
+    bool remove_politician_watch(const std::string& user_id, const std::string& politician);   // false if not watched
+    std::vector<std::string> user_politician_watchlist(const std::string& user_id);
+    std::vector<std::string> politician_watchers(const std::string& politician);  // normalized name match
+
     // screener
     // Replaces all screener results with `results` in one transaction.
     void replace_screen_results(const std::vector<ScreenResult>& results);

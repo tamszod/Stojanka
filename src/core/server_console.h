@@ -8,6 +8,7 @@
 #include "core/command_reply.h"
 #include "core/commands.h"
 #include "core/monitor_service.h"
+#include "core/politicians/politician_service.h"
 #include "core/repository.h"
 #include "core/screener.h"
 
@@ -30,6 +31,7 @@ public:
 
     CommandReply run(const std::string& line);
     void set_arena(arena::ArenaService* arena) { arena_ = arena; }
+    void set_politicians(politicians::PoliticianService* politicians) { politicians_ = politicians; }
     std::vector<WatchedStockRow> watched_stocks();
 
 private:
@@ -43,6 +45,7 @@ private:
     AdminService& admin_;
     CommandService& commands_;
     arena::ArenaService* arena_ = nullptr;
+    politicians::PoliticianService* politicians_ = nullptr;
 };
 
 }  // namespace strojanka

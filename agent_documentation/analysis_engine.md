@@ -73,6 +73,20 @@ Sanity: the same learner reaches AUC 0.94 on a synthetic linear signal and 0.996
 so the null result reflects the data, not a bug. Oracle bots: Pythia Sharpe 0.33, Sibylla 0.17 → stay in training.
 Ideas if revisited: longer horizons, fundamentals/earnings dates (free sources needed), a point-in-time universe.
 
+## 7e. Politicians (core/politicians) — Senate trade disclosure tracking
+Not a prediction model: it republishes US Senate Periodic Transaction Reports (STOCK Act disclosures), read
+directly from efdsearch.senate.gov since the free community trackers (HouseStockWatcher, SenateStockWatcher)
+have shut down and no clean official API exists. **Scope, by design, not oversight:** only electronic
+filings are parsed (`SenateTrade` table extraction via a hand-written `find_blocks()` tag matcher, no HTML
+library dependency); paper (scanned-image) filings are skipped entirely; the House of Representatives is not
+covered at all (House filings are PDF-only — out of scope, would need separate PDF text extraction work).
+Disclosures are legally allowed up to ~45 days after the actual trade, so "new" means newly *disclosed*, not
+a same-day trade. **Known risk, documented not hidden:** efdsearch.senate.gov runs Akamai bot-protection
+that returned `HTTP 403 (Server: AkamaiGHost)` to this sandbox's IP during development; the working
+hypothesis (unverified from here) is that it targets datacenter/cloud ranges rather than ordinary residential
+connections, so real-world behavior from the user's own network could only be confirmed after release —
+see `documentation/politicians.md`'s troubleshooting section and `server_console`'s `politicians run`.
+
 ## 8. Measured performance (2026-10-10, `strojanka --backtest`, 10y Yahoo daily data)
 | Set | PEAK right | random | SUPPORT right | random |
 |---|---|---|---|---|

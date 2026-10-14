@@ -47,6 +47,7 @@ CommandReply CommandService::help() const {
       << "`/news stock:FCX` - recent headlines, their tone, and how news affects the signals\n"
       << "`/arena` - the paper-trading bots ($1,000 each) and how they are doing; `/arena bot:Athena` for one bot\n"
       << "`/pythia` - the built-in AI model: how well it did on years it never saw, and today's strongest candidates\n"
+      << "`/politicians` - recent US Senate stock trades; `monitor politician:Pelosi` to watch one personally (DM on a new trade)\n"
       << "`/admin` - admin panel: disk space, database location, admins (admins only)\n\n"
       << "In a direct message with me you can also just type the command, for example "
       << "`buy FCX 0.858291457 59.78$`, `sell FCX 0.858291457 67.87$`, `profit FCX` or `status`.\n\n"
@@ -351,8 +352,19 @@ CommandReply CommandService::run_text(const std::string& user, const std::string
     if (name == "help") return help();
     if (name == "status") return status(user);
     if (name == "profit") return profit(user, arg(1));
-    if (name == "monitor") return words.size() < 2 ? usage("monitor FCX") : monitor(user, arg(1));
-    if (name == "remove") return words.size() < 2 ? usage("remove FCX") : remove(user, arg(1));
+    if (name == "monitor") {
+        if (words.size() >= 2 && to_lower(words[1]) == "politician") {
+            return words.size() < 3 ? usage("monitor politician Nancy Pelosi") : monitor_politician(user, rest(2));
+        }
+        return words.size() < 2 ? usage("monitor FCX") : monitor(user, arg(1));
+    }
+    if (name == "remove") {
+        if (words.size() >= 2 && to_lower(words[1]) == "politician") {
+            return words.size() < 3 ? usage("remove politician Nancy Pelosi") : remove_politician(user, rest(2));
+        }
+        return words.size() < 2 ? usage("remove FCX") : remove(user, arg(1));
+    }
+    if (name == "politicians") return politicians(user, rest(1));
     if (name == "report") return words.size() < 2 ? usage("report FCX") : report(user, arg(1));
     if (name == "suggest") return suggest(user, arg(1));
     if (name == "news") return words.size() < 2 ? usage("news FCX") : news(user, arg(1));
@@ -370,6 +382,48 @@ CommandReply CommandService::run_text(const std::string& user, const std::string
     if (name == "buy") return words.size() < 4 ? usage("buy FCX 0.858291457 59.78$") : buy(user, arg(1), arg(2), rest(3));
     if (name == "sell") return words.size() < 4 ? usage("sell FCX 0.858291457 67.87$") : sell(user, arg(1), arg(2), rest(3));
     return fail("I don't know `" + words[0] + "`. Type `help` to see what I can do.");
+}
+
+CommandReply CommandService::monitor_politician(const std::string& user, const std::string& input) {
+    const std::string name = trim(input);
+    if (name.empty()) return fail("Usage: `monitor politician Nancy Pelosi`.");
+    if (repo_.add_politician_watch(user, to_lower(name))) {
+        return {true, "Now watching **" + name + "**. You'll get a direct message when a new trade is disclosed. Every new "
+                      "Senate disclosure is also posted in the server's public channel, if an admin has set one up."};
+    }
+    return {true, "You're already watching **" + name + "**."};
+}
+
+CommandReply CommandService::remove_politician(const std::string& user, const std::string& input) {
+    const std::string name = trim(input);
+    if (name.empty()) return fail("Usage: `remove politician Nancy Pelosi`.");
+    if (repo_.remove_politician_watch(user, to_lower(name))) return {true, "Stopped watching **" + name + "**."};
+    return fail("You are not watching **" + name + "**.");
+}
+
+CommandReply CommandService::politicians(const std::string& user, const std::string& name_filter) {
+    (void)user;
+    const std::string filter = trim(name_filter);
+    const auto trades = repo_.recent_politician_trades(filter, 10);
+    if (trades.empty()) {
+        if (!filter.empty()) return {true, "No disclosed trades found yet for **" + filter + "**."};
+        return {true, "No politician trades tracked yet. The Senate disclosure check runs once a day; try again soon, or "
+                      "ask an admin to run `politicians run` in the server console."};
+    }
+    std::ostringstream m;
+    m << "**Recent politician stock trades" << (filter.empty() ? "" : " - " + filter) << "** (US Senate only)\n";
+    for (const auto& t : trades) {
+        const bool has_ticker = !t.ticker.empty() && t.ticker != "--";
+        m << "- **" << t.full_name() << "**";
+        if (!t.office.empty()) m << " (" << t.office << ")";
+        m << ": " << (t.transaction_type.empty() ? "trade" : t.transaction_type) << " " << (has_ticker ? t.ticker : t.asset_name)
+          << ", " << format_money(t.amount_min) << (t.amount_max ? "-" + format_money(*t.amount_max) : "+");
+        if (!t.transaction_date.empty()) m << ", " << t.transaction_date;
+        m << "\n";
+    }
+    m << "\nWatch one personally with `monitor politician <name>`. Disclosures can legally appear up to ~45 days after the "
+         "trade. Senate only for now: the House only publishes filings as PDFs, which isn't supported yet.";
+    return {true, m.str()};
 }
 
 CommandReply CommandService::report(const std::string& user, const std::string& input) {

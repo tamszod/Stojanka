@@ -226,6 +226,40 @@ CREATE TABLE ml_models (
 );
 )SQL";
 
+// Version 7: politician stock trades (Senate PTR disclosures) and who personally watches whom.
+const char* kMigration7 = R"SQL(
+CREATE TABLE politician_trades (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    chamber          TEXT NOT NULL,
+    first_name       TEXT NOT NULL,
+    last_name        TEXT NOT NULL,
+    office           TEXT,
+    report_id        TEXT NOT NULL,
+    item_number      INTEGER NOT NULL,
+    filed_date       TEXT,
+    transaction_date TEXT,
+    owner            TEXT,
+    ticker           TEXT,
+    asset_name       TEXT,
+    asset_type       TEXT,
+    transaction_type TEXT,
+    amount_min       REAL,
+    amount_max       REAL,
+    has_amount_max   INTEGER NOT NULL DEFAULT 0,
+    comment          TEXT,
+    fetched_at       TEXT NOT NULL,
+    public           INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (report_id, item_number)
+);
+CREATE INDEX idx_politician_trades_name ON politician_trades(last_name, first_name);
+CREATE TABLE politician_watch (
+    discord_id TEXT NOT NULL,
+    politician TEXT NOT NULL,  -- normalized "first last" (lowercase), matched against trades
+    added_at   TEXT NOT NULL,
+    PRIMARY KEY (discord_id, politician)
+);
+)SQL";
+
 }  // namespace
 
 const std::vector<Migration>& all_migrations() {
@@ -236,6 +270,7 @@ const std::vector<Migration>& all_migrations() {
         {4, "bot admins", kMigration4},
         {5, "arena of paper-trading bots", kMigration5},
         {6, "trained AI models", kMigration6},
+        {7, "politician stock trades and personal watchlists", kMigration7},
     };
     return migrations;
 }

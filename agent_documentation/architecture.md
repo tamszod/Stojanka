@@ -18,9 +18,11 @@ BotHost::start (src/bot/bot_host.cpp)
  â”śâ”€ Database + migrate_database(backup=true)
  â”śâ”€ Repository, YahooProvider, news::RssNewsProvider
  â”śâ”€ MonitorService, Screener, CommandService, AdminService (commands.set_admin), ServerConsole
- â””â”€ DiscordBot(...) : Notifier   â†’ start() = cluster.start(st_return); online()/name() for the UI
+ â”śâ”€ SenateEfdClient, PoliticianService (set_politicians on ServerConsole)
+ â””â”€ DiscordBot(..., politicians) : Notifier   â†’ start() = cluster.start(st_return); online()/name() for the UI
       on_ready (once): register global slash commands with contexts {itc_bot_dm} (DM-only product
-                       decision; legacy guild_id -> delete that guild's commands), set notifier, monitor.start()
+                       decision; legacy guild_id -> delete that guild's commands), set notifier, monitor.start(),
+                       politicians.start() (announcer â†’ post_to_public_channel, notifier â†’ this)
       on_slashcommand: thinking(ephemeral) -> ThreadPool(4) -> CommandService -> interaction_response_edit
       on_message_create: DMs only (guild_id == 0, not bots) -> ThreadPool -> CommandService::run_text -> message_create
       Notifier::send: DM; on failure post "<@user> msg" in users.notify_channel_id
@@ -33,9 +35,10 @@ BotHost::start (src/bot/bot_host.cpp)
 | command workers (4) | `DiscordBot::workers_` | run `CommandService` methods (may download prices) |
 | monitor loop (1) | `MonitorService::thread_` | `run_cycle()` now, then every `poll_interval_minutes` (condition_variable wait, `stop()` wakes it) |
 | cycle pool (`max_parallel_fetches`) | created per cycle in `run_cycle()` | `refresh(symbol, emit_signals=true)` per distinct watched symbol |
-| arena loop (1) + pool | `ArenaService::thread_` (started on ready) | hourly `tick(last_complete_date(now))`: refresh universe prices (10y first, then 1mo every 6 h), rebuild `Universe`, Pythia `train` (when backtests are due or no model; ~30 s CPU) then `annotate`, weekly backtests, advance live bots day by day, promote/demote, weekly leaderboard; announcements via `set_announcer` â†’ `DiscordBot::post_to_arena_channel` (channel id in `app_meta.arena_channel_id`) |
+| arena loop (1) + pool | `ArenaService::thread_` (started on ready) | hourly `tick(last_complete_date(now))`: refresh universe prices (10y first, then 1mo every 6 h), rebuild `Universe`, Pythia `train` (when backtests are due or no model; ~30 s CPU) then `annotate`, weekly backtests, advance live bots day by day, promote/demote, weekly leaderboard; announcements via `set_announcer` â†’ `DiscordBot::post_to_public_channel` (channel id in `app_meta.arena_channel_id` / `AdminService::kPublicChannelKey`) |
 | D++ timer (hourly) | `DiscordBot` (on ready) | submits `AdminService::check_health(*this)` to the command workers; also once right after owners load |
 | screener loop (1) + pool | `Screener::thread_` (started on ready) | wakes hourly or on `request_run()`; if `app_meta.screener_last_run` > 20 h old: `run_now()` = fetch 10y + `walk_forward` + current state for each universe symbol (~15 s for 70) |
+| politicians loop (1) | `PoliticianService::thread_` (started on ready) | once daily (`app_meta.politicians_last_run` > 24 h old): `tick()` = `list_filings` over the last 60 days, skip paper filings and already-seen `report_id`s, `fetch_filing` each new one, store via `add_politician_trades`, announce new trades via `set_announcer` â†’ `post_to_public_channel`, and DM each trade's `politician_watchers` via `set_notifier` |
 
 Concurrency rules: SQLite connection is shared and serialized by `Database::mutex()` (recursive)
 held by each `Repository` call. `MonitorService::symbol_mutex(symbol)` serializes refreshes of
@@ -60,6 +63,7 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 | platform.h/.cpp | `executable_path` (GetModuleFileNameW / _NSGetExecutablePath / /proc), `executable_dir`, `enable_utf8_console` |
 | instance_lock.h/.cpp | `InstanceLock(path)`: Windows exclusive CreateFile (share 0, delete-on-close), POSIX `flock`; `acquired()` |
 | utf8_path.h | `utf8_path(std::string)`, `path_utf8(path)`, `path_utf8_generic(path)` |
+| html.h/.cpp | `strojanka::html::decode_entities`, `strip_tags`, `text_of` (= strip_tags + decode_entities + trim); shared by `news_provider.cpp` and `politicians/senate_efd.cpp` |
 
 ### src/core
 | File | Key symbols |
@@ -90,18 +94,20 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 | arena/arena_service.h/.cpp | `ArenaService`: stages training â†’ proving (40 live days, â‰Ą Atlasâ’2pp, DD â‰¤15%, rolling window) â†’ public (demote: DD >25% from high, or 60-day lag >10pp vs Atlas, or weekly backtest fails); `tick`, `view`, `leaderboard(include_private)`, `details`, `channel_id`/`set_channel_id`, `last_complete_date` (21:30 UTC) |
 | ml/gbdt.h/.cpp | `Gbdt`: logistic gradient-boosted trees (32 quantile bins, NaN bin, depth 3, 120 trees, lr 0.06, min_leaf 150, L2 10, row 0.5/feature 0.8 sampling), `predict`, JSON save/load; `auc()` |
 | ml/pythia.h/.cpp | `Pythia(repo)`: `features()` (25, row i uses bars ≤ i; names in `feature_names()`), `market_context()` (per date: mean 20d/60d return, share above SMA200), `train(Universe&)` (labels = `evaluate_outcome` Support/Peak with move = clamp(2.5·vol20, 1.5%, 15%), horizon 20; yearly walk-forward from min_year+3 with a 35-day gap, writes OOS preds into `SymbolData.oracle_up/down` for whole test years; final models on data up to last−35 d; report AUC/base/top-decile; `save_model("pythia")` incl. last 400 days of context), `annotate` (fills NaN in the last 300 bars with final models; latest picks), `predict(symbol, bars)`, `load`, `status_text` |
-| server_console.h/.cpp | `ServerConsole::run(line)` (help, status, stocks, users, check, screen, report/news/suggest, `as <id> <cmd>` (ensure_user + run_text), admin â€¦ via `AdminService::handle_console` (trusted), loglevel, version), `watched_stocks()` rows for the UI table |
+| politicians/senate_efd.h/.cpp | `SenateSource` interface (`start`, `list_filings(start,end)` → `FilingRef{first_name,last_name,office,filed_date,report_id,url,electronic}`, `fetch_filing(ref)` → `SenateTrade{report_id,item_number,transaction_date,owner,ticker,asset_name,asset_type,transaction_type,amount_min,amount_max(optional),comment}`); `SenateEfdClient` = PIMPL'd libcurl session (in-memory cookie jar for the CSRF token, `CURLINFO_COOKIELIST`); `parse_transaction_table(html, report_id)` (exposed for tests) using the dependency-free `find_blocks()` tag matcher; paper filings are skipped, House is out of scope (PDF-only). efdsearch.senate.gov has Akamai bot-protection (403 from some IPs) — documented, not silently retried. |
+| politicians/politician_service.h/.cpp | `PoliticianService(repo, SenateSource&, Config)`: `start/stop`, `tick()` (daily, `kLookbackDays`=60 lookback, `kCheckEverySeconds`=24h, last run in `app_meta.politicians_last_run`) — `list_filings` → skip already-seen (`has_politician_filing`) and paper filings → `fetch_filing` → combine with the `FilingRef` identity fields → `add_politician_trades` → `set_announcer` callback (public channel) + `set_notifier` (DM each row's `politician_watchers`) |
+| server_console.h/.cpp | `ServerConsole::run(line)` (help, status, stocks, users, check, screen, report/news/suggest, `as <id> <cmd>` (ensure_user + run_text), admin â€¦ via `AdminService::handle_console` (trusted), `arena`/`arena run`/`arena channel`, `politicians`/`politicians run`/`politicians channel` (shares `kPublicChannelKey`) via `set_politicians`, loglevel, version), `watched_stocks()` rows for the UI table |
 | admin_service.h/.cpp | `AdminService(db, repo, monitor, config, config_path)`: `set_owners`, `is_admin`, `admins`, `handle(user, args)` (status/list/add/remove/movedb), `status_text`, `move_database(folder)` (space check â‰Ą1.5Ă—size+50MB, `db.move_to`, rewrite conf), `check_health(Notifier&)` (disk < `low_disk_warning_mb` â†’ DM all admins, 24 h throttle; `CycleStats.failed_cycles_in_a_row â‰Ą 2` â†’ outage DM, 6 h throttle). `parse_user_id`, `format_bytes`. |
 | command_reply.h | `CommandReply{ok,text}` (shared by commands and admin) |
-| commands.h/.cpp | `CommandService` (`help,status,profit,monitor,remove,buy,sell,report`), `CommandReply{ok,text}` |
+| commands.h/.cpp | `CommandService` (`help,status,profit,monitor,remove,buy,sell,report,monitor_politician,remove_politician,politicians`), `CommandReply{ok,text}`; `run_text` dispatches `monitor politician <name>` / `remove politician <name>` / `politicians <name filter>` |
 
 ### src/bot
 | File | Key symbols |
 |---|---|
 | main.cpp | CLI: `--config`, `--migrate`, `--analyze SYM`, `--news SYM`, `--suggest [side]`, `--move-db DIR`, `--backtest SYM...`, `--version`; `default_config_path` (exe dir, then cwd); `run_bot` = BotHost start+wait |
-| bot_host.h/.cpp | `BotHost(config_path)`: `start(&error)`, `stop()`, `wait()`, `running()`, `online()`, `bot_name()`, accessors for db/repo/monitor/screener/admin/console; `check_discord_token` |
+| bot_host.h/.cpp | `BotHost(config_path)`: `start(&error)`, `stop()`, `wait()`, `running()`, `online()`, `bot_name()`, accessors for db/repo/monitor/screener/admin/console/politicians; `check_discord_token` |
 | tls_trust.h/.cpp | `configure_tls_trust(pem_path)`: vcpkg OpenSSL has no OS root CAs, so D++'s TLS verify fails (D++ reports it only as "Malformed HTTP response"). Unless `SSL_CERT_FILE` is set: Windows exports the ROOT stores to `<db dir>/trusted_roots.pem`; macOS uses `/etc/ssl/cert.pem`. Runs before `dpp::cluster` is created. |
-| discord_bot.h/.cpp | `DiscordBot` (`register_commands`, `on_command`, `dispatch`, `send`), `fit_message` (2000-char limit, UTF-8 safe) |
+| discord_bot.h/.cpp | `DiscordBot` (ctor also takes `politicians::PoliticianService&`; `register_commands` incl. `/politicians name:`, `/monitor` and `/remove` with optional `stock`+`politician` (`dispatch` requires exactly one)), `on_command`, `dispatch`, `send`, `post_to_public_channel` (renamed from `post_to_arena_channel`, now used by both arena and politicians announcers), `fit_message` (2000-char limit, UTF-8 safe) |
 
 ### src/installer
 | File | Key symbols |

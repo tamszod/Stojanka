@@ -32,5 +32,6 @@ strojanka-crash.*
 .vs/
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db

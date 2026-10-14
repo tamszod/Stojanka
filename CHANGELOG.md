@@ -3,6 +3,17 @@
 All notable changes to Strojanka are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 
+## [0.1.1] - 2026-10-14
+
+### Added
+- Politician stock trade tracking: a daily background check for new US Senate stock trade disclosures (Periodic Transaction Reports), read directly from the government's own electronic filing site since the free community trackers that used to cover this (HouseStockWatcher, SenateStockWatcher) have shut down. Senate electronic filings only for now; the House is not covered (it only publishes PDFs, which needs separate work). New trades are posted to the same public channel as the arena bots (`admin channel`). `/politicians` (also `/politicians name:Pelosi`) lists recent disclosures; `monitor politician:<name>` / `remove politician:<name>` add or remove a personal watch that sends you a direct message on a new trade. `strojanka --politicians [name]` runs a check from the command line. Schema version 7 adds the trade and watchlist tables.
+- A crash handler: on an access violation, an uncaught exception reaching main(), or an abort, `strojanka-crash.log` (and a `.dmp` file on Windows) is written next to the program before it ends, so a crash leaves a trace instead of disappearing silently. Wired into all three executables. Release builds now also emit `.pdb` debug symbol files, so a `.dmp` can actually be matched to a function and source line.
+
+### Fixed
+- A real crash in Pythia's training (`Gbdt::train`): a reference into a vector was read after calls that could reallocate the vector's storage, a use-after-free that mostly didn't show up in quiet testing but reliably crashed the full server, where many background services allocate memory at the same time. Found and fixed using the new crash handler's first real report.
+- Uninstalling with "remove my data" only deleted `*.log` files, so a crash dump (`strojanka-crash.dmp`) was never cleaned up. Now matches the whole `strojanka-crash.*` family.
+- An incremental build could keep embedding the old version number after bumping `VERSION`, since CMake wasn't told to reconfigure when that file changes (only a full reconfigure or clean rebuild picked it up).
+
 ## [0.1.0] - 2026-10-10
 
 First version.

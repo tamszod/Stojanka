@@ -17,9 +17,6 @@
 
 namespace strojanka::arena {
 
-// app_meta key holding the Discord channel where public bots report.
-inline constexpr const char* kChannelKey = "arena_channel_id";
-
 // What the server window and the commands show about one bot.
 struct BotView {
     std::string name, origin, idea, stage, stage_label;

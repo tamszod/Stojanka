@@ -90,12 +90,15 @@ bool BotHost::start(std::string* error) {
     arena_ = std::make_unique<arena::ArenaService>(*repo_, *prices_, config_);
     arena_->set_pythia(pythia_.get());
     commands_->set_arena(arena_.get());
+    senate_ = std::make_unique<politicians::SenateEfdClient>();
+    politicians_ = std::make_unique<politicians::PoliticianService>(*repo_, *senate_, config_);
     console_ = std::make_unique<ServerConsole>(*repo_, *monitor_, *screener_, *admin_, *commands_);
     console_->set_arena(arena_.get());
+    console_->set_politicians(politicians_.get());
 
     log_info("Strojanka " + std::string(STROJANKA_VERSION) + " starting, database " + db_path);
     log_info(configure_tls_trust(path_utf8(utf8_path(db_path).parent_path() / "trusted_roots.pem")));
-    bot_ = std::make_unique<DiscordBot>(config_, *repo_, *monitor_, *commands_, *screener_, *admin_, *arena_);
+    bot_ = std::make_unique<DiscordBot>(config_, *repo_, *monitor_, *commands_, *screener_, *admin_, *arena_, *politicians_);
     {
         std::lock_guard<std::mutex> lock(wait_mutex_);
         stop_requested_ = false;
@@ -109,6 +112,8 @@ void BotHost::stop() {
     if (bot_) log_info("stopping Strojanka");
     bot_.reset();  // disconnects and stops the monitor and screener
     console_.reset();
+    politicians_.reset();
+    senate_.reset();
     arena_.reset();
     pythia_.reset();
     admin_.reset();

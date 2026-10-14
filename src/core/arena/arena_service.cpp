@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/strings.h"
+#include "core/admin_service.h"
 #include "core/log.h"
 #include "core/screener.h"
 #include "core/thread_pool.h"
@@ -75,8 +76,8 @@ void ArenaService::announce(const std::string& message) {
     else log_info("arena (no channel): " + message.substr(0, 120));
 }
 
-std::string ArenaService::channel_id() { return repo_.meta(kChannelKey); }
-void ArenaService::set_channel_id(const std::string& id) { repo_.set_meta(kChannelKey, id); }
+std::string ArenaService::channel_id() { return repo_.meta(kPublicChannelKey); }
+void ArenaService::set_channel_id(const std::string& id) { repo_.set_meta(kPublicChannelKey, id); }
 
 void ArenaService::start() {
     if (thread_.joinable()) return;

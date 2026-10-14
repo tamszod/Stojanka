@@ -26,6 +26,13 @@ Unknown keys are ignored by old versions, so adding keys is backward compatible.
 3. Unit tests: `test_calibration_learns_cycles` must keep passing (synthetic cycle sanity).
 4. If `AnalysisParams` gains fields, add them to `to_json/from_json` with defaults (stored JSON from older versions must still load).
 
+## Add a scraped external data source (pattern used by politicians)
+Define a small abstract interface in `src/core/<feature>/` (mirrors `MarketDataProvider`/`SenateSource`) so a
+background `*Service` can be unit-tested against a fake implementation with zero real network calls. Keep
+HTML/text parsing in a free function exposed for tests (e.g. `parse_transaction_table`), separate from the
+networking class. Document any bot-protection/rate-limit risk honestly in code comments and user docs rather
+than guessing it away — test real endpoint behavior with `curl` before writing parser code.
+
 ## Add another front-end (web, Telegram, CLI)
 Create a new executable target linking `strojanka_core`; construct `Database/Repository/YahooProvider/MonitorService/CommandService`
 as in `run_bot`; implement `Notifier::send` (must call `repo.mark_notification`). Do not put platform types into core.

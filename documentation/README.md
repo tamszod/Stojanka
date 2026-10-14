@@ -25,6 +25,8 @@ your profit.
 - **Runs a trading-bot arena.** Thirteen bots named after Greek and Roman gods trade $1,000 of play
   money each. Only the ones that prove themselves on years of old prices *and* months of live
   prices report their trades and profits in your Discord server.
+- **Tracks politician stock trades.** Checks daily for newly disclosed US Senate stock trades and
+  posts them in your Discord server; you can also watch a specific politician.
 
 ## Guides
 
@@ -35,6 +37,7 @@ your profit.
 | [Commands](commands.md) | Everything you can type in Discord |
 | [Pythia, the built-in AI](pythia.md) | What the AI model predicts, how it is tested, and how well it does |
 | [The arena](arena.md) | Trading bots with $1,000 of play money, and how they prove themselves |
+| [Politician trades](politicians.md) | Tracking US Senate stock trade disclosures |
 | [How the signals work](how-signals-work.md) | PEAK, SUPPORT, stock categories and how the bot learns |
 | [Building from source](building.md) | Developers: building, testing, versioning |
 
