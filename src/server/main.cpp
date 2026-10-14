@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "bot/bot_host.h"
+#include "common/crash_handler.h"
 #include "common/platform.h"
 #include "common/strings.h"
 #include "common/utf8_path.h"
@@ -85,6 +86,7 @@ struct LogFeed {
 }  // namespace
 
 int main(int argc, char** argv) {
+    install_crash_handler();
     std::string config_path;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--config") config_path = argv[i + 1];

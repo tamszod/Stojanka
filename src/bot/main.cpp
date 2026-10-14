@@ -6,6 +6,7 @@
 
 #include "bot/bot_host.h"
 #include "common/config.h"
+#include "common/crash_handler.h"
 #include "common/platform.h"
 #include "common/strings.h"
 #include "common/utf8_path.h"
@@ -195,6 +196,7 @@ int run_bot(const std::string& config_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    install_crash_handler();
     enable_utf8_console();
     std::string config_path;
     std::string analyze_symbol;

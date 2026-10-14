@@ -21,6 +21,9 @@ build/
 dist/
 .vcpkg/
 vcpkg_installed/
+*.obj
+*.pdb
+strojanka-crash.*
 
 # Logs
 *.log

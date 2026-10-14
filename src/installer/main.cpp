@@ -8,6 +8,7 @@
 #include <iostream>
 #include <string>
 
+#include "common/crash_handler.h"
 #include "common/platform.h"
 #include "core/version.h"
 #include "installer/console_ui.h"
@@ -60,6 +61,7 @@ void attach_console() {}
 }  // namespace
 
 int main(int argc, char** argv) {
+    install_crash_handler();
     enable_utf8_console();
     ConsoleOptions opt;
     bool console = false;

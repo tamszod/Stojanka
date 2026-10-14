@@ -30,6 +30,7 @@ set(STROJANKA_COMMON_SOURCES
   src/common/payload.cpp
   src/common/platform.cpp
   src/common/instance_lock.cpp
+  src/common/crash_handler.cpp
 )
 
 # Turns a file into a byte-array header (used for the HTML interfaces of the installer and server).
@@ -75,6 +76,9 @@ add_library(strojanka_core STATIC
 )
 target_include_directories(strojanka_core PUBLIC src "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(strojanka_core PUBLIC unofficial::sqlite3::sqlite3 nlohmann_json::nlohmann_json CURL::libcurl)
+if(WIN32)
+  target_link_libraries(strojanka_core PUBLIC dbghelp)
+endif()
 
 # Windows resource file (icon + version info) for an executable.
 set(STROJANKA_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/icon/strojanka.ico")
@@ -145,7 +149,7 @@ if(WIN32)
   set_property(TARGET StrojankaInstaller PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   set_property(TARGET StrojankaInstaller PROPERTY WIN32_EXECUTABLE TRUE)
   target_link_options(StrojankaInstaller PRIVATE /ENTRY:mainCRTStartup)
-  target_link_libraries(StrojankaInstaller PRIVATE ole32 shell32 shlwapi uuid advapi32 user32 version)
+  target_link_libraries(StrojankaInstaller PRIVATE ole32 shell32 shlwapi uuid advapi32 user32 version dbghelp)
 elseif(APPLE)
   set_source_files_properties(assets/icon/strojanka.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
   target_sources(StrojankaInstaller PRIVATE assets/icon/strojanka.icns)
@@ -162,6 +166,9 @@ endif()
 # --- packer (build tool) ------------------------------------------------------------------
 add_executable(strojanka_pack src/packer/main.cpp ${STROJANKA_COMMON_SOURCES})
 target_include_directories(strojanka_pack PRIVATE src)
+if(WIN32)
+  target_link_libraries(strojanka_pack PRIVATE dbghelp)
+endif()
 
 # --- tests --------------------------------------------------------------------------------
 if(STROJANKA_BUILD_TESTS)
