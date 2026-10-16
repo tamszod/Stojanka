@@ -27,6 +27,10 @@ public:
     CommandReply help() const;
     CommandReply status(const std::string& user);
     CommandReply profit(const std::string& user, const std::string& symbol_or_empty);
+    // What the user holds now: shares, average cost, price, value, weight and profit, per currency.
+    CommandReply portfolio(const std::string& user);
+    // Recorded buys and sells, newest first, with the profit each sale realized. symbol: "" = all.
+    CommandReply history(const std::string& user, const std::string& symbol_or_empty);
     CommandReply monitor(const std::string& user, const std::string& symbol);
     CommandReply remove(const std::string& user, const std::string& symbol);
     // Personal politician-trade watch (separate from stock watching): a direct message when

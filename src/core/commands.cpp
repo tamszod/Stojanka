@@ -1,6 +1,7 @@
 #include "core/commands.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <sstream>
 
@@ -28,7 +29,12 @@ bool parse_symbol(const std::string& input, std::string& symbol, CommandReply& e
     return true;
 }
 
-std::string pad(const std::string& s, size_t width) { return s.size() >= width ? s : s + std::string(width - s.size(), ' '); }
+// Pads to a width in characters, not bytes, so columns with € or £ line up.
+std::string pad(const std::string& s, size_t width) {
+    size_t chars = 0;
+    for (unsigned char c : s) chars += (c & 0xC0) != 0x80;
+    return chars >= width ? s : s + std::string(width - chars, ' ');
+}
 
 }  // namespace
 
@@ -39,6 +45,8 @@ CommandReply CommandService::help() const {
       << "`/help` - this message\n"
       << "`/status` - your watched stocks with price, trend and how much money you have in them\n"
       << "`/profit` - profit for every stock you traded; `/profit stock:FCX` for one stock\n"
+      << "`/portfolio` - what you hold now: shares, average cost, value, weight and profit\n"
+      << "`/history` - every buy and sell you recorded, with the profit of each sale; `/history stock:FCX` for one stock\n"
       << "`/monitor stock:FCX` - start watching a stock or ETF (you get an analysis report). ETFs work the same: "
       << "`SPY`, or a European listing with its exchange ending such as `CSPX.L` (London) or `SXR8.DE` (Xetra)\n"
       << "`/remove stock:FCX` - stop watching a stock (only when you hold no shares of it)\n"
@@ -172,6 +180,190 @@ CommandReply CommandService::profit(const std::string& user, const std::string& 
         m << "Per currency (not converted):";
         for (const auto& [cur, t] : totals) m << "\n- " << cur << ": " << summary(cur, t.first, t.second);
     }
+    return {true, m.str()};
+}
+
+namespace {
+
+std::string signed_percent(double fraction) { return (fraction > 0.0005 ? "+" : "") + format_percent(fraction, 1); }
+
+// "2026-10-16T10:46:03Z" -> "2026-10-16 10:46 UTC"
+std::string readable_time(const std::string& iso) {
+    if (iso.size() < 16) return iso;
+    std::string s = iso.substr(0, 16);
+    s[10] = ' ';
+    return s + " UTC";
+}
+
+constexpr size_t kReplyBudget = 1900;  // Discord cuts messages at 2000 characters
+
+}  // namespace
+
+CommandReply CommandService::portfolio(const std::string& user) {
+    std::map<std::string, std::vector<TransactionRecord>> by_symbol;
+    for (auto& t : repo_.transactions(user)) by_symbol[t.symbol].push_back(std::move(t));
+    if (by_symbol.empty()) {
+        return {true, "Your portfolio is empty. Record a purchase with `/buy stock:FCX shares:2 paid:150$` "
+                      "(`paid` is the total you paid)."};
+    }
+
+    struct Holding {
+        std::string symbol, currency;
+        Position pos;
+        double price = 0;
+        bool priced = false;
+    };
+    struct Totals {
+        double value = 0, cost = 0, realized = 0;
+        int holdings = 0;
+    };
+    std::vector<Holding> held;
+    std::map<std::string, Totals> totals;  // per currency
+    std::string oldest_price;
+    for (const auto& [sym, txs] : by_symbol) {
+        Holding h;
+        h.symbol = sym;
+        h.pos = compute_position(txs);
+        const auto stock = repo_.get_stock(sym);
+        h.currency = stock ? stock->currency : "USD";
+        h.priced = stock && stock->last_price > 0;
+        h.price = h.priced ? stock->last_price : 0;
+        Totals& t = totals[h.currency];
+        t.realized += h.pos.realized_profit;
+        if (!h.pos.has_shares()) continue;
+        t.holdings += 1;
+        t.cost += h.pos.cost_basis;
+        t.value += h.priced ? h.pos.market_value(h.price) : h.pos.cost_basis;
+        if (stock && (oldest_price.empty() || stock->last_price_at < oldest_price)) oldest_price = stock->last_price_at;
+        held.push_back(h);
+    }
+    if (held.empty()) {
+        return {true, "You don't hold any shares right now. Everything you bought has been sold; see `/history` for "
+                      "your trades and `/profit` for what they made."};
+    }
+    std::sort(held.begin(), held.end(), [](const Holding& a, const Holding& b) {
+        if (a.currency != b.currency) return a.currency < b.currency;
+        return a.pos.market_value(a.price) > b.pos.market_value(b.price);
+    });
+
+    std::ostringstream table;
+    table << pad("STOCK", 9) << pad("SHARES", 13) << pad("AVG COST", 11) << pad("PRICE", 11) << pad("VALUE", 12)
+          << pad("WEIGHT", 7) << "P/L\n";
+    for (const auto& h : held) {
+        const std::string& cur = h.currency;
+        table << pad(h.symbol, 9) << pad(format_shares(h.pos.shares), 13) << pad(format_money(h.pos.average_cost(), cur), 11);
+        if (!h.priced) {
+            table << pad("?", 11) << pad("?", 12) << pad("?", 7) << "?\n";
+            continue;
+        }
+        const double value = h.pos.market_value(h.price);
+        const double pl = h.pos.unrealized_profit(h.price);
+        const double weight = totals[cur].value > 0 ? value / totals[cur].value : 0;
+        table << pad(format_money(h.price, cur), 11) << pad(format_money(value, cur), 12) << pad(format_percent(weight, 0), 7)
+              << format_signed_money(pl, cur) << " ("
+              << signed_percent(h.pos.cost_basis > 0 ? pl / h.pos.cost_basis : 0) << ")\n";
+    }
+
+    std::ostringstream m;
+    m << "**Your portfolio**";
+    if (!oldest_price.empty()) m << " (prices as of " << readable_time(oldest_price) << ")";
+    m << "\n```\n" << table.str() << "```";
+    for (const auto& [cur, t] : totals) {
+        if (t.holdings == 0 && std::fabs(t.realized) < 0.005) continue;
+        const double pl = t.value - t.cost;
+        m << "\n**" << (totals.size() > 1 ? cur + ":" : std::string("Total:")) << "** " << format_money(t.value, cur)
+          << " in " << t.holdings << " holding" << (t.holdings == 1 ? "" : "s") << " (paid " << format_money(t.cost, cur)
+          << "), unrealized " << format_signed_money(pl, cur) << " (" << signed_percent(t.cost > 0 ? pl / t.cost : 0)
+          << "), realized so far " << format_signed_money(t.realized, cur);
+    }
+    if (totals.size() > 1) m << "\nCurrencies are shown separately, not converted.";
+    m << "\nWEIGHT = share of your holdings in that currency. `/history` lists every trade.";
+    return {true, m.str()};
+}
+
+CommandReply CommandService::history(const std::string& user, const std::string& symbol_input) {
+    std::string symbol;
+    if (!trim(symbol_input).empty()) {
+        CommandReply err;
+        if (!parse_symbol(symbol_input, symbol, err)) return err;
+    }
+    // Replay all of the user's trades so each sale's profit matches /profit, then filter.
+    std::vector<TradeEntry> entries;
+    for (auto& e : trade_history(repo_.transactions(user))) {
+        if (symbol.empty() || e.tx.symbol == symbol) entries.push_back(std::move(e));
+    }
+    if (entries.empty()) {
+        return {true, symbol.empty() ? "You have no recorded trades yet. Record one with `/buy`."
+                                     : "You have no recorded trades for **" + symbol + "**."};
+    }
+
+    std::map<std::string, std::string> currencies;
+    auto currency_of = [&](const std::string& sym) -> const std::string& {
+        auto it = currencies.find(sym);
+        if (it != currencies.end()) return it->second;
+        const auto stock = repo_.get_stock(sym);
+        return currencies[sym] = stock ? stock->currency : "USD";
+    };
+    struct Totals {
+        double bought = 0, sold = 0, realized = 0;
+        int buys = 0, sells = 0;
+    };
+    std::map<std::string, Totals> totals;
+    for (const auto& e : entries) {
+        Totals& t = totals[currency_of(e.tx.symbol)];
+        if (e.tx.side == TxSide::Buy) {
+            t.bought += e.tx.total;
+            t.buys += 1;
+        } else {
+            t.sold += e.tx.total;
+            t.realized += e.realized_profit;
+            t.sells += 1;
+        }
+    }
+
+    std::ostringstream footer;
+    for (const auto& [cur, t] : totals) {
+        footer << "\n**" << (totals.size() > 1 ? cur + ":" : std::string("Total:")) << "** " << t.buys << " buy"
+               << (t.buys == 1 ? "" : "s") << " for " << format_money(t.bought, cur);
+        if (t.sells > 0) {
+            footer << ", " << t.sells << " sale" << (t.sells == 1 ? "" : "s") << " for " << format_money(t.sold, cur)
+                   << ", realized profit " << format_signed_money(t.realized, cur);
+        } else {
+            footer << ", no sales yet";
+        }
+    }
+
+    const bool one_stock = !symbol.empty();
+    std::string header = pad("DATE", 12) + pad("SIDE", 6) + (one_stock ? "" : pad("STOCK", 9)) + pad("SHARES", 13) +
+                         pad("PRICE", 11) + pad("TOTAL", 12) + (one_stock ? pad("PROFIT", 12) + "HOLDING" : "PROFIT") + "\n";
+    std::string title = one_stock ? "**" + symbol + " trading history** (newest first)\n```\n"
+                                  : "**Your trading history** (newest first)\n```\n";
+    std::string rows;
+    size_t shown = 0;
+    const size_t reserve = title.size() + header.size() + footer.str().size() + 200;  // closing fence and the "showing" line
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+        const auto& e = *it;
+        const std::string& cur = currency_of(e.tx.symbol);
+        const bool sell = e.tx.side == TxSide::Sell;
+        std::string row = pad(e.tx.created_at.substr(0, 10), 12) + pad(sell ? "SELL" : "BUY", 6) +
+                          (one_stock ? "" : pad(e.tx.symbol, 9)) + pad(format_shares(e.shares), 13) +
+                          pad(format_money(e.price, cur), 11) + pad(format_money(e.tx.total, cur), 12);
+        const std::string profit = sell ? format_signed_money(e.realized_profit, cur) : "-";
+        row += one_stock ? pad(profit, 12) + format_shares(e.held_after) : profit;
+        row += "\n";
+        if (reserve + rows.size() + row.size() > kReplyBudget) break;
+        rows += row;
+        ++shown;
+    }
+
+    std::ostringstream m;
+    m << title << header << rows << "```";
+    if (shown < entries.size()) {
+        m << "Showing the latest " << shown << " of " << entries.size() << " trades.";
+        if (!one_stock) m << " `/history stock:FCX` shows one stock.";
+    }
+    m << footer.str();
+    if (totals.size() > 1) m << "\nCurrencies are shown separately, not converted.";
     return {true, m.str()};
 }
 
@@ -394,6 +586,8 @@ CommandReply CommandService::run_text(const std::string& user, const std::string
     if (name == "help") return help();
     if (name == "status") return status(user);
     if (name == "profit") return profit(user, arg(1));
+    if (name == "portfolio" || name == "holdings") return portfolio(user);
+    if (name == "history" || name == "trades") return history(user, arg(1));
     if (name == "monitor") {
         if (words.size() >= 2 && to_lower(words[1]) == "politician") {
             return words.size() < 3 ? usage("monitor politician Nancy Pelosi") : monitor_politician(user, rest(2));

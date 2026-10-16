@@ -1327,6 +1327,84 @@ void test_etfs(const fs::path& dir) {
     CHECK(repo.pending_signals("ISF.L").empty());
 }
 
+void test_portfolio_and_history(const fs::path& dir) {
+    // Replay: two buys at different prices, then a sale against the average cost.
+    auto tx = [](const char* sym, TxSide side, double shares, double total, const char* at) {
+        TransactionRecord t;
+        t.symbol = sym;
+        t.side = side;
+        t.shares = shares;
+        t.total = total;
+        t.created_at = at;
+        return t;
+    };
+    const auto rows = trade_history({tx("NVDA", TxSide::Buy, 2, 200, "2026-10-01T10:00:00Z"),
+                                     tx("FCX", TxSide::Buy, 1, 50, "2026-10-02T10:00:00Z"),
+                                     tx("NVDA", TxSide::Buy, 2, 280, "2026-10-03T10:00:00Z"),
+                                     tx("NVDA", TxSide::Sell, 1, 150, "2026-10-04T10:00:00Z"),
+                                     tx("FCX", TxSide::Sell, 5, 60, "2026-10-05T10:00:00Z")});  // more than held
+    CHECK(rows.size() == 5);
+    if (rows.size() == 5) {
+        CHECK_NEAR(rows[3].realized_profit, 30.0, 1e-9);  // 150 - 1 x 120 average cost
+        CHECK_NEAR(rows[3].held_after, 3.0, 1e-9);
+        CHECK_NEAR(rows[3].price, 150.0, 1e-9);
+        CHECK_NEAR(rows[4].shares, 1.0, 1e-9);  // capped at what was held
+        CHECK_NEAR(rows[4].price, 60.0, 1e-9);
+        CHECK_NEAR(rows[4].realized_profit, 10.0, 1e-9);
+        CHECK_NEAR(rows[0].realized_profit, 0.0, 1e-12);
+    }
+
+    Database db(path_utf8(dir / "portfolio.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    EtfProvider provider;
+    provider.bars = make_bars(cyclical_closes(300, 5));
+    provider.listings = {{"NVDA", {"USD", "EQUITY"}}, {"SXR8.DE", {"EUR", "ETF"}}, {"FCX", {"USD", "EQUITY"}}};
+    Config config;
+    MonitorService monitor(repo, provider, config);
+    CommandService cmd(repo, monitor);
+
+    CHECK(cmd.portfolio("nobody").text.find("empty") != std::string::npos);
+    CHECK(cmd.history("nobody", "").text.find("no recorded trades") != std::string::npos);
+
+    CHECK(cmd.buy("u1", "NVDA", "2", "200$").ok);
+    CHECK(cmd.buy("u1", "NVDA", "2", "280$").ok);
+    CHECK(cmd.sell("u1", "NVDA", "1", "150$").ok);
+    CHECK(cmd.buy("u1", "SXR8.DE", "1", "700\xE2\x82\xAC").ok);
+    const auto port = cmd.portfolio("u1");
+    CHECK(port.ok);
+    CHECK(port.text.find("$120.00") != std::string::npos);  // average cost of the 3 NVDA left
+    CHECK(port.text.find("**USD:**") != std::string::npos && port.text.find("**EUR:**") != std::string::npos);
+    CHECK(port.text.find("realized so far +$30.00") != std::string::npos);
+    CHECK(port.text.find("100%") != std::string::npos);  // each is the only holding in its currency
+    CHECK(cmd.run_text("u1", "portfolio").text == port.text);
+
+    const auto hist = cmd.history("u1", "");
+    CHECK(hist.ok);
+    CHECK(hist.text.find("SELL") != std::string::npos);
+    CHECK(hist.text.find("+$30.00") != std::string::npos);
+    CHECK(hist.text.find("SXR8.DE") != std::string::npos);
+    CHECK(hist.text.find("SXR8.DE") < hist.text.find("NVDA  "));  // newest first
+    const auto one = cmd.history("u1", "nvda");
+    CHECK(one.text.find("HOLDING") != std::string::npos);
+    CHECK(one.text.find("SXR8.DE") == std::string::npos);
+    CHECK(cmd.history("u1", "FCX").text.find("no recorded trades for **FCX**") != std::string::npos);
+    CHECK(cmd.run_text("u1", "history NVDA").text == one.text);
+
+    // Sold everything: the portfolio says so instead of an empty table.
+    CHECK(cmd.buy("u2", "FCX", "1", "50$").ok);
+    CHECK(cmd.sell("u2", "FCX", "1", "60$").ok);
+    CHECK(cmd.portfolio("u2").text.find("don't hold any shares") != std::string::npos);
+
+    // A long history stays inside one Discord message and says what it left out.
+    for (int i = 0; i < 80; ++i) CHECK(cmd.buy("u3", "NVDA", "0.123456789", "12.34$").ok);
+    const auto longest = cmd.history("u3", "");
+    CHECK(longest.text.size() < 2000);
+    CHECK(longest.text.find("Showing the latest") != std::string::npos);
+    CHECK(longest.text.find("```", longest.text.find("```") + 3) != std::string::npos);  // code block closed
+    CHECK(cmd.help().text.size() < 2000);
+}
+
 }  // namespace
 
 int main() {
@@ -1357,6 +1435,7 @@ int main() {
         {"payload", [&] { test_payload(dir); }},
         {"previous run: clean, ended by Windows, crashed", test_previous_run},
         {"ETFs: pence, search, European amounts, currencies", [&] { test_etfs(dir); }},
+        {"portfolio and trading history", [&] { test_portfolio_and_history(dir); }},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

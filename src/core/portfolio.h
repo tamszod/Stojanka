@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "core/models.h"
@@ -24,7 +25,23 @@ struct Position {
     bool has_shares() const { return shares > kShareEpsilon; }
 };
 
+// Applies one transaction of this stock; returns the profit it realized (0 for a buy).
+double apply_transaction(Position& position, const TransactionRecord& tx);
+
 // Transactions must be in chronological order (Repository::transactions returns them that way).
 Position compute_position(const std::vector<TransactionRecord>& transactions);
+
+// One row of a user's trading history.
+struct TradeEntry {
+    TransactionRecord tx;
+    double shares = 0;           // shares actually traded (a sale is capped at what was held)
+    double price = 0;            // per share: total / shares
+    double realized_profit = 0;  // sales only: received minus the average cost of the shares sold
+    double held_after = 0;       // shares of this stock held after the trade
+};
+
+// Replays transactions of any number of stocks (chronological) with the same average-cost rules
+// as compute_position, so the history and the portfolio always agree.
+std::vector<TradeEntry> trade_history(const std::vector<TransactionRecord>& transactions);
 
 }  // namespace strojanka

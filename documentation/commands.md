@@ -97,6 +97,26 @@ If you bought at several prices, the bot uses your **average cost**. Example: yo
 $100, then 2 more for $140. Your average cost is $60 per share. Selling 1 share for $75 is a
 realized profit of $15.
 
+## /portfolio
+What you hold right now: shares, average cost, current price, value, its weight (share of your
+holdings in that currency) and the profit or loss on it, with totals per currency. As text:
+`portfolio`.
+
+```
+STOCK    SHARES       AVG COST   PRICE      VALUE       WEIGHT P/L
+NVDA     3            $120.00    $217.23    $651.69     69%    +$291.69 (+81.0%)
+FCX      5            $41.00     $57.38     $286.90     31%    +$81.90 (+40.0%)
+```
+
+Stocks you sold completely don't appear here; their profit is in the **realized so far** total and
+in `/history`.
+
+## /history and /history stock:FCX
+Every buy and sell you recorded, newest first: date, shares, price per share, total, and for each
+sale the profit it made against your average cost. With a stock, it also shows how many shares you
+held after each trade. A long history shows the latest trades that fit in one message. As text:
+`history` or `history FCX`.
+
 ## /report stock:FCX
 A fresh analysis report for any stock, the same as the one `/monitor` shows. You don't need to be
 watching the stock.

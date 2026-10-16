@@ -4,8 +4,8 @@ Strojanka is a Discord bot that watches stocks for you. It tells you when a stoc
 probably reached the **top of its current swing (PEAK)**, so it may be time to sell, and when a
 stock you watch has fallen to a **floor (SUPPORT)**, so it may be time to buy.
 
-It also keeps a simple record of what you bought and sold, so it can show you your balance and
-your profit.
+It also keeps a simple record of what you bought and sold, so it can show you your portfolio, your
+trading history and your profit.
 
 > Strojanka's signals are statistical estimates based on past prices. They are not financial
 > advice, and no tool can predict the market reliably.

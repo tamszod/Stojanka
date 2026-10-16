@@ -150,6 +150,12 @@ void DiscordBot::register_commands() {
     profit.add_option(stock_option(false));
     cmds.push_back(profit);
 
+    cmds.emplace_back("portfolio", "What you hold now: shares, average cost, value, weight and profit", app);
+
+    dpp::slashcommand history("history", "Every buy and sell you recorded, with the profit of each sale", app);
+    history.add_option(stock_option(false));
+    cmds.push_back(history);
+
     dpp::slashcommand monitor("monitor", "Start watching a stock, or a politician's disclosed trades", app);
     monitor.add_option(stock_option(false));
     monitor.add_option(politician_option());
@@ -303,6 +309,8 @@ CommandReply DiscordBot::dispatch(const std::string& name, const std::string& us
     if (name == "help") return commands_.help();
     if (name == "status") return commands_.status(user);
     if (name == "profit") return commands_.profit(user, stock);
+    if (name == "portfolio") return commands_.portfolio(user);
+    if (name == "history") return commands_.history(user, stock);
     if (name == "monitor" || name == "remove") {
         if (!stock.empty() && !politician.empty()) return {false, "Give either a stock or a politician, not both."};
         if (stock.empty() && politician.empty()) return {false, "Give a stock ticker or a politician's name."};
