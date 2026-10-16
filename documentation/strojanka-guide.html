@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strojanka Guide</title>
+<meta name="description" content="How Strojanka 0.2.1 works: markets, alerts, price and safety alerts, backups, email reminders, updates, politician trades and the trading-bot arena.">
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --surface: #ffffff;
+    --surface-2: #efede6;
+    --text: #1d1f22;
+    --muted: #5d6168;
+    --border: #dedbd2;
+    --accent: #1f6f5c;
+    --accent-soft: #e1f0eb;
+    --warn: #8a5a00;
+    --warn-soft: #fbf0d9;
+    --code-bg: #f0eee8;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141618;
+      --surface: #1c1f22;
+      --surface-2: #24282c;
+      --text: #e7e6e1;
+      --muted: #a0a4aa;
+      --border: #30353a;
+      --accent: #5cc4a6;
+      --accent-soft: #1d3530;
+      --warn: #e6b45c;
+      --warn-soft: #3a2f1b;
+      --code-bg: #262a2e;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141618;
+    --surface: #1c1f22;
+    --surface-2: #24282c;
+    --text: #e7e6e1;
+    --muted: #a0a4aa;
+    --border: #30353a;
+    --accent: #5cc4a6;
+    --accent-soft: #1d3530;
+    --warn: #e6b45c;
+    --warn-soft: #3a2f1b;
+    --code-bg: #262a2e;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  code, kbd, pre { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg);
+    padding: 12px 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+    line-height: 1.45;
+    margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; }
+  kbd {
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 .35em;
+    background: var(--surface);
+  }
+
+  .layout {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 16px 64px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  @media (min-width: 900px) {
+    .layout { grid-template-columns: 220px 1fr; padding: 0 24px 80px; }
+    nav.toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+  }
+
+  header.hero {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 16px 8px;
+  }
+  @media (min-width: 900px) { header.hero { padding: 56px 24px 16px; } }
+  .hero h1 { margin: 0 0 6px; font-size: clamp(28px, 5vw, 40px); letter-spacing: -.02em; }
+  .hero p { margin: 0; color: var(--muted); max-width: 62ch; }
+  .badge {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 2px 10px;
+    margin-bottom: 12px;
+  }
+
+  nav.toc { font-size: 14px; }
+  nav.toc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  nav.toc a {
+    display: block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  nav.toc a:hover { background: var(--surface-2); }
+  @media (max-width: 899px) {
+    nav.toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  }
+
+  main { min-width: 0; }
+  section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 18px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+  }
+  @media (min-width: 600px) { section { padding: 26px 28px; } }
+  section h2 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.01em; }
+  section .lead { margin: 0 0 16px; color: var(--muted); }
+  section h3 { margin: 22px 0 6px; font-size: 17px; }
+  section p, section li { max-width: 72ch; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  .table-wrap { overflow-x: auto; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+
+  .note, .warn {
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 14px 0;
+    font-size: 15px;
+  }
+  .note { background: var(--accent-soft); }
+  .warn { background: var(--warn-soft); }
+  .note strong:first-child, .warn strong:first-child { display: block; margin-bottom: 2px; }
+  .warn strong:first-child { color: var(--warn); }
+
+  .steps { counter-reset: step; list-style: none; padding-left: 0; }
+  .steps li { counter-increment: step; position: relative; padding-left: 36px; margin: 10px 0; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 1px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent); color: var(--surface);
+    font-size: 13px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .flow span {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .flow i { font-style: normal; color: var(--muted); }
+
+  blockquote {
+    margin: 12px 0;
+    padding: 10px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2);
+    border-radius: 0 8px 8px 0;
+  }
+
+  footer { color: var(--muted); font-size: 14px; text-align: center; padding: 8px 16px 40px; }
+  .theme-toggle {
+    position: fixed; right: 16px; bottom: 16px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <span class="badge">Version 0.2.1</span>
+  <h1>Strojanka Guide</h1>
+  <p>How the bot works and what to do in everyday situations: adding stocks, when prices are checked, what the alerts mean, backups and email reminders, updates, politician trades and the trading-bot arena.</p>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#install">Install, update, revert</a></li>
+      <li><a href="#stocks">Adding stocks</a></li>
+      <li><a href="#markets">Markets and price checks</a></li>
+      <li><a href="#alerts">PEAK and SUPPORT alerts</a></li>
+      <li><a href="#watch">Price and safety alerts</a></li>
+      <li><a href="#portfolio">Portfolio and history</a></li>
+      <li><a href="#backups">Backups</a></li>
+      <li><a href="#email">Email reminders and SMTP</a></li>
+      <li><a href="#politicians">Politician trades</a></li>
+      <li><a href="#arena">The arena</a></li>
+      <li><a href="#closed">If Strojanka closes</a></li>
+      <li><a href="#ideas">Ideas not built yet</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="install">
+      <h2>Install, update, revert</h2>
+      <p class="lead">Everything goes through one program: <code>StrojankaInstaller.exe</code>.</p>
+
+      <h3>Updating</h3>
+      <ol class="steps">
+        <li>Download <code>StrojankaInstaller.exe</code> from the latest release on GitHub.</li>
+        <li>Run it and choose <strong>Update</strong>. Your token, database and settings are kept.</li>
+        <li>A running Strojanka Server is closed for you first. Tick <strong>Start Strojanka now</strong> at the end to start it again.</li>
+      </ol>
+
+      <h3>Going back: Revert update</h3>
+      <p>For <strong>3 days</strong> after an update, the setup shows a <strong>Revert update</strong> card. It puts back the version the update replaced. Your settings, watch lists and trades stay. Open the setup from the downloaded installer, or from <em>Settings &gt; Apps &gt; Installed apps &gt; Strojanka &gt; … &gt; Modify</em>.</p>
+      <p>If the update also upgraded the database, the copy saved just before the update is put back. Anything recorded after the update is kept in a file called <code>strojanka.db.after-update-&lt;date&gt;</code> next to the database.</p>
+
+      <h3>Start with Windows and shortcuts</h3>
+      <ul>
+        <li><strong>Start with Windows</strong> (on by default): Strojanka Server opens minimized every time you sign in, and waits up to three minutes for the internet before connecting to Discord. You can switch it off in <em>Task Manager &gt; Startup apps</em>, or in the setup.</li>
+        <li><strong>Start menu</strong> and <strong>Desktop</strong> shortcuts are options on the Welcome page. An update keeps the choices you made before.</li>
+        <li>It starts when you <em>sign in</em>, not before. If Windows restarts on its own at night, the bot runs again once someone signs in.</li>
+      </ul>
+    </section>
+
+    <section id="stocks">
+      <h2>Adding stocks</h2>
+      <p class="lead">Strojanka uses Yahoo Finance tickers. A US stock has no ending; other exchanges need one.</p>
+
+      <pre><code>/monitor stock:NVDA        US stock, no ending
+/monitor stock:OTP.BD      OTP Bank on the Budapest exchange
+/monitor stock:DHL.DE      DHL Group on Xetra
+/monitor stock:HEAL.L      a London listing</code></pre>
+
+      <h3>If you get the ending wrong</h3>
+      <p>The bot doesn't just say "not found". It suggests the real listings:</p>
+      <ul>
+        <li><code>OTP</code> → <code>OTP.BD</code>, <code>DHL</code> → <code>DHL.DE</code>: a ticker without an ending gets matches from the main exchanges.</li>
+        <li><code>HEAL.G</code> → <code>HEAL.L</code>: an ending that doesn't exist gets the list of real endings plus suggestions.</li>
+      </ul>
+      <p>Type <code>/market</code> to see every exchange's ending.</p>
+
+      <h3>ETFs</h3>
+      <p>ETFs work exactly like stocks: <code>SPY</code>, <code>VOO</code>, <code>CSPX.L</code>, <code>SXR8.DE</code>. Pick the listing you actually bought, because the same fund trades in different currencies on different exchanges.</p>
+      <ul>
+        <li>Prices are in the listing's currency. London prices quoted in pence are converted to pounds, so type amounts in pounds too.</li>
+        <li>News isn't used for ETFs, since fund headlines are mostly about the fund company.</li>
+        <li>Amounts can be typed the European way: <code>1.234,50€</code> is 1234.50.</li>
+      </ul>
+
+      <p>Company names appear in the watched-stock tables and in the alerts, for example <strong>NVDA</strong> (NVIDIA).</p>
+    </section>
+
+    <section id="markets">
+      <h2>Markets and price checks</h2>
+      <p class="lead">A stock's price is only checked while its market is open.</p>
+
+      <h3>The rule</h3>
+      <div class="flow">
+        <span>Market open</span><i>→ checked every poll interval (15 min by default)</i>
+      </div>
+      <div class="flow">
+        <span>Market closes</span><i>→ one more check about 10 minutes later for the closing prices</i>
+      </div>
+      <div class="flow">
+        <span>Market closed</span><i>→ not checked until it opens again</i>
+      </div>
+
+      <h3>When every market is closed</h3>
+      <p>At the weekend, or at night when all your watched stocks' markets are closed, nothing is fetched at all. The server window then shows this on the <strong>Last price check</strong> card instead of a time that keeps getting older:</p>
+      <blockquote><strong>Markets closed</strong><br>Tokyo opens Mon 02:00</blockquote>
+      <p>The admin panel shows the same, and the log says it once.</p>
+      <ul>
+        <li>Checking starts again about <strong>30 seconds after the first market opens</strong>, without waiting for the next regular check.</li>
+        <li><strong>Adding a stock</strong> (<code>/monitor</code>, or a <code>/buy</code> of a stock you weren't watching) or <strong>removing one</strong> recalculates this straight away. If you add a Tokyo stock on Saturday while you only watch Budapest stocks, the next check moves to Tokyo's opening, and the log says <em>next price check moved earlier: Tokyo opens Mon 02:00</em>.</li>
+        <li>The console's <code>check</code> command always checks everything, open or closed.</li>
+      </ul>
+
+      <div class="warn">
+        <strong>Public holidays aren't known</strong>
+        Hours are Monday to Friday with no holiday list, so on a holiday a market shows as open and is checked as usual. That costs a few requests but does no harm.
+      </div>
+
+      <h3>/market</h3>
+      <p><code>/market</code> lists every exchange: its ticker ending, today's or the next trading hours in this computer's time, and whether it's open now. <code>/market market:London</code> shows just one, with an example. The server window has the same list in the <strong>Markets</strong> tab (<kbd>Ctrl</kbd>+<kbd>3</kbd>), with the markets of watched stocks marked.</p>
+
+      <p>Some of the exchanges, with their hours in their own local time:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Market</th><th>Ending</th><th>Example</th><th>Local hours</th></tr></thead>
+          <tbody>
+            <tr><td>US (NYSE, Nasdaq)</td><td>none</td><td><code>AAPL</code></td><td>09:30–16:00</td></tr>
+            <tr><td>London</td><td><code>.L</code></td><td><code>BARC.L</code></td><td>08:00–16:30</td></tr>
+            <tr><td>Xetra (Germany)</td><td><code>.DE</code></td><td><code>SAP.DE</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Amsterdam</td><td><code>.AS</code></td><td><code>ASML.AS</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Paris</td><td><code>.PA</code></td><td><code>MC.PA</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Milan</td><td><code>.MI</code></td><td><code>ENI.MI</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Zurich</td><td><code>.SW</code></td><td><code>NESN.SW</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Vienna</td><td><code>.VI</code></td><td><code>OMV.VI</code></td><td>09:00–17:30</td></tr>
+            <tr><td>Warsaw</td><td><code>.WA</code></td><td><code>PKO.WA</code></td><td>09:00–17:05</td></tr>
+            <tr><td>Budapest</td><td><code>.BD</code></td><td><code>OTP.BD</code></td><td>09:00–17:00</td></tr>
+            <tr><td>Tokyo</td><td><code>.T</code></td><td><code>7203.T</code></td><td>09:00–11:30, 12:30–15:30</td></tr>
+            <tr><td>Hong Kong</td><td><code>.HK</code></td><td><code>0700.HK</code></td><td>09:30–12:00, 13:00–16:00</td></tr>
+            <tr><td>Sydney</td><td><code>.AX</code></td><td><code>BHP.AX</code></td><td>10:00–16:00</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><code>/market</code> shows the full list, converted to your computer's time.</p>
+    </section>
+
+    <section id="alerts">
+      <h2>PEAK and SUPPORT alerts</h2>
+      <p class="lead">Alerts arrive as direct messages from the bot.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Alert</th><th>Means</th><th>Who gets it</th></tr></thead>
+          <tbody>
+            <tr><td><strong>PEAK</strong></td><td>The stock has probably reached the top of its current swing: time to sell.</td><td>Only watchers who <strong>own shares</strong>. The message says how many you have.</td></tr>
+            <tr><td><strong>SUPPORT</strong></td><td>The stock has probably fallen to a floor: time to buy.</td><td><strong>Everyone watching the stock</strong>, including people who already own shares. The message doesn't mention your shares.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <blockquote>
+        <strong>FCX</strong> (Freeport-McMoRan) has reached PEAK. You have 0.858291457 shares. It is time to sell.<br>
+        <strong>FCX</strong> (Freeport-McMoRan) has reached SUPPORT level. It is time to buy.
+      </blockquote>
+
+      <h3>Limits on how often</h3>
+      <ul>
+        <li>At most one alert per price swing.</li>
+        <li>At most one PEAK and one SUPPORT per stock every 3 days.</li>
+        <li>No alerts from price data older than 5 days.</li>
+        <li>A SUPPORT alert is held back when there is red-flag news about the company. The log says so.</li>
+      </ul>
+
+      <p>Each alert also carries a line on the news of the last three days (not for ETFs) and Pythia's view, once the AI model is trained.</p>
+
+      <div class="note">
+        <strong>Read the honest test</strong>
+        <code>/report</code> compares the bot's past calls with a call on a random day. When its number isn't clearly higher, the report says <em>no proven edge yet</em>: treat that stock's alerts as hints only.
+      </div>
+    </section>
+
+    <section id="watch">
+      <h2>Price and safety alerts</h2>
+      <p class="lead">Two alerts you control yourself, new in 0.2.1.</p>
+
+      <h3>Price alerts: /watch</h3>
+      <pre><code>/watch stock:NVDA price:250      one message when NVDA gets to $250
+/watch                           your price alerts
+/unwatch stock:NVDA              remove all of NVDA's
+/unwatch stock:NVDA price:250    remove just that one</code></pre>
+      <ul>
+        <li>If the price is below 250 now, it waits for a rise to 250 or more; if above, for a fall to 250 or less.</li>
+        <li>It fires <strong>once</strong>, then it's done.</li>
+        <li>The stock doesn't need to be on your watch list. It's checked anyway, but you then get only the price alert, no PEAK/SUPPORT.</li>
+        <li>Checked every poll interval (15 minutes by default) while the market is open, so a quick spike between two checks can be missed. At most 25 per person.</li>
+      </ul>
+      <blockquote>🔔 <strong>NVDA</strong> (NVIDIA) reached your price: <strong>$251.30</strong> (you asked for $250.00 or higher).</blockquote>
+
+      <h3>Safety alerts: /safety</h3>
+      <p>For stocks you <strong>hold</strong>. When one that has been comfortably in profit falls back close to your buying price, you get a warning while selling would still leave a little profit after the sale fee.</p>
+      <div class="flow">
+        <span>In profit</span><i>→ falls →</i><span>Warn at</span><i>→ still falling →</i><span>Break-even</span><i>= what you paid + the fee</i>
+      </div>
+      <ul>
+        <li><strong>Break-even</strong> = your average cost plus the fee for one sale (0.20 by default, in the stock's currency), per share. Selling below it loses money.</li>
+        <li><strong>Warn at</strong> = about two normal days' moves of that stock above break-even (1.5% to 8%). A calm stock is warned close to the line, a jumpy one earlier.</li>
+        <li>Only while the price is <strong>falling</strong>. A stock near break-even that is climbing again stays quiet.</li>
+        <li><strong>Once per fall.</strong> The next warning comes only after the price has climbed back up well above the line. Right after a purchase there's nothing to protect yet.</li>
+        <li>If it drops straight past the line between two checks, the message says it has dropped below your buying price and what selling now would lose.</li>
+      </ul>
+      <blockquote>🛡️ <strong>NVDA</strong> (NVIDIA) is falling and is close to your buying price: <strong>$120.45</strong> now, break-even <strong>$120.07</strong>. If you don't want to risk a loss, now is the time to sell: your 3 shares would still make about <strong>+$1.15</strong> after the fee. You don't have to, though: a fall can turn around, and it's your call.</blockquote>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>As text</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>/safety</code></td><td><code>safety</code></td><td>Every holding's price, break-even, warning price and state.</td></tr>
+            <tr><td><code>/safety fee:0.50</code></td><td><code>safety fee 0.50</code></td><td>What one sale costs you.</td></tr>
+            <tr><td><code>/safety alerts:off</code></td><td><code>safety off</code></td><td>Silences all safety alerts (<code>on</code> turns them back on).</td></tr>
+            <tr><td><code>/safety stock:NVDA alerts:off</code></td><td><code>safety off NVDA</code></td><td>Silences them for one stock only.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="portfolio">
+      <h2>Portfolio and history</h2>
+      <p class="lead">Record your trades and the bot keeps the books.</p>
+      <pre><code>/buy  stock:FCX shares:0.858291457 paid:59.78$       paid = the total, not per share
+/sell stock:FCX shares:0.858291457 received:67.87$</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Shows</th></tr></thead>
+          <tbody>
+            <tr><td><code>/portfolio</code></td><td>What you hold now: shares, average cost, price, value, weight and profit or loss, with totals per currency.</td></tr>
+            <tr><td><code>/history</code>, <code>/history stock:FCX</code></td><td>Every buy and sell, newest first, with the profit of each sale. For one stock, also the shares held after each trade.</td></tr>
+            <tr><td><code>/status</code></td><td>Your watch list with prices, trends, holdings and your balance.</td></tr>
+            <tr><td><code>/profit</code></td><td>Realized profit (from sales) and unrealized profit (shares you still hold).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>With several buys at different prices, profit uses your <strong>average cost</strong>. Amounts in different currencies are never added together; each currency gets its own total.</p>
+    </section>
+
+    <section id="backups">
+      <h2>Backups</h2>
+      <p class="lead">Everything the bot knows is in one database file. A backup is a checked copy of it.</p>
+
+      <h3>Making a backup</h3>
+      <ul>
+        <li>Press <strong>Backup</strong> in the server window's top bar, or type <code>backup</code> in its console, or send <code>admin backup</code> in Discord.</li>
+        <li>The file is called <code>strojanka-&lt;date&gt;.strojanka_backup</code> and goes into the <code>backups</code> folder of the install folder.</li>
+        <li>To keep backups on another drive or in a cloud folder, set <code>backup_folder</code> in the settings file. That's the safer place for them.</li>
+        <li>The <strong>Database</strong> card shows how long ago the last backup was, or <em>never backed up ⚠</em>.</li>
+      </ul>
+
+      <h3>Reminders</h3>
+      <div class="flow">
+        <span>Last backup</span><i>→ 3 weeks pass →</i><span>First reminder</span><i>→ then every 2 days until you make a backup</i>
+      </div>
+      <p>Admins get the reminder as a Discord message and, if an address is set, by email. See <a href="#email">email reminders</a>.</p>
+
+      <h3>Restoring</h3>
+      <ol class="steps">
+        <li>Run the setup and choose <strong>Change settings</strong>, or start a new install.</li>
+        <li>Under <strong>Database</strong>, pick <strong>Restore a backup</strong> and choose the <code>.strojanka_backup</code> file.</li>
+        <li>Finish the setup. A database already in that place is not deleted; it's kept beside it as <code>.before-restore-&lt;date&gt;</code>.</li>
+      </ol>
+      <p>Uninstalling never deletes the <code>backups</code> folder.</p>
+    </section>
+
+    <section id="email">
+      <h2>Email reminders and SMTP</h2>
+      <p class="lead">You don't need to create a mail server. Strojanka uses the one your email provider already runs.</p>
+
+      <p>An <strong>SMTP server</strong> is the server that sends email. Gmail, Outlook and the others each run one. Strojanka logs in to yours with your address and a password, and sends the reminder from your account to itself.</p>
+
+      <h3>Setting it up with Gmail (free)</h3>
+      <ol class="steps">
+        <li>Turn on <strong>2-Step Verification</strong> for your Google account, if it isn't on yet. Google only offers app passwords with it on.</li>
+        <li>Open <a href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</a>, type a name such as <em>Strojanka</em> and click <strong>Create</strong>.</li>
+        <li>Google shows a 16-character password. Put it in the setup as the <strong>app password</strong>, next to your Gmail address. Your normal Gmail password won't work here.</li>
+        <li>Send <code>admin email test</code> to the bot and check that the message arrives.</li>
+      </ol>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>admin email you@example.com</code></td><td>Sets or changes the address for reminders.</td></tr>
+            <tr><td><code>admin email test</code></td><td>Sends a test email now.</td></tr>
+            <tr><td><code>admin email off</code></td><td>Stops email reminders (Discord reminders stay).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The server is filled in from your address for Gmail, Outlook/Hotmail, Yahoo and iCloud. For another provider, find "SMTP settings" in its help pages and set <code>smtp_server</code> in the settings file, for example <code>smtps://smtp.example.com:465</code>. The mailbox password lives in <code>smtp_password</code>.</p>
+
+      <div class="warn">
+        <strong>Why not run your own mail server?</strong>
+        It's possible (hMailServer, for example), but most home internet providers block outgoing mail, and Gmail and others usually send mail from a home connection to spam or reject it. Your provider's server avoids all that and costs nothing.
+      </div>
+    </section>
+
+    <section id="politicians">
+      <h2>Politician trades</h2>
+      <p class="lead">Members of the US Congress must disclose their stock trades. Strojanka reads the official filings once a day.</p>
+      <ul>
+        <li><strong>House of Representatives:</strong> read from the House Clerk's official site, including its PDF trade reports. Scanned paper filings (about 15%) are images and are skipped.</li>
+        <li><strong>Senate:</strong> its site refuses connections from outside the US. From Hungary it answers "refused (HTTP 403)" every time. Strojanka still tries daily and logs it, but expect Senate trades only if the bot runs on a US connection.</li>
+        <li>Disclosures can come up to ~45 days after the trade, so "new" means <em>newly disclosed</em>.</li>
+        <li>The very first check stores what it finds without posting it, so the channel isn't flooded. Every filing after that is posted.</li>
+      </ul>
+      <pre><code>/politicians                    recent trades, everyone's
+/politicians name:Pelosi        one politician
+/monitor politician:Pelosi      a direct message when they disclose a trade
+/remove politician:Pelosi
+admin channel &lt;channel ID&gt;      where new filings (and public arena bots) are posted</code></pre>
+      <p>A last name is enough. Every word you type must appear in the name.</p>
+    </section>
+
+    <section id="arena">
+      <h2>The arena</h2>
+      <p class="lead">Thirteen trading bots, each with $1,000 of play money and one fixed strategy.</p>
+
+      <div class="flow">
+        <span>Training</span><i>→ passes the history test →</i><span>Proving</span><i>→ 40 good live days →</i><span>Public</span>
+      </div>
+
+      <h3>What happens when a bot fails</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Situation</th><th>What happens</th></tr></thead>
+          <tbody>
+            <tr><td>Fails the history test</td><td>Stays in <strong>training</strong>. Every 7 days all bots are tested again with the newest prices; if it passes, it starts proving with a fresh $1,000.</td></tr>
+            <tr><td>Proving, but not good enough</td><td>Stays in <strong>proving</strong>, judged again every day on its latest 40 trading days. It doesn't start over, so it can still make it.</td></tr>
+            <tr><td>Public, but falls &gt;25% or lags Atlas by 10 points over 60 days</td><td>Back to <strong>proving</strong>, announced in the channel.</td></tr>
+            <tr><td>Public, but fails the weekly history test</td><td>Back to <strong>training</strong>, announced in the channel.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="warn">
+        <strong>"Training" doesn't mean learning</strong>
+        Each bot's rules are fixed, for example "Ares holds a stock while its 20-day average is above its 100-day average". Nothing adjusts those settings. The weekly retest only adds one week to about 8 years of history, so a bot that failed will almost always fail again. Only <strong>Pythia</strong> and <strong>Sibylla</strong> really retrain: the AI model behind them is trained again every week, so their results can change.
+      </div>
+
+      <p>Follow it with <code>/arena</code> and <code>/arena bot:Diana</code> in Discord, or in the <strong>Arena</strong> tab of the server window (<kbd>Ctrl</kbd>+<kbd>2</kbd>), which also shows the private bots. Play money only, not investment advice.</p>
+    </section>
+
+    <section id="closed">
+      <h2>If Strojanka closes by itself</h2>
+      <p class="lead">The log now records why it stopped. Open <code>strojanka.log</code> with the <strong>Log</strong> button.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>In the log</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><em>Windows is shutting down or restarting</em>, or <em>an installer or Windows Update asked running programs to close</em></td><td>Not a crash: Windows ended it. Windows Update restarts at night unless you set active hours. With <strong>Start with Windows</strong> on, it comes back when you sign in.</td></tr>
+            <tr><td><em>the computer is going to sleep</em></td><td>Nothing runs while the computer sleeps. Change <em>Settings &gt; System &gt; Power</em> if the bot should keep running.</td></tr>
+            <tr><td><code>CRASH:</code> lines, or <em>the previous run … did not shut down cleanly</em></td><td>A real crash. Open a GitHub issue and attach <code>strojanka.log</code>, plus <code>strojanka-crash.log</code> and <code>strojanka-crash.dmp</code> from the install folder if they exist.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="ideas">
+      <h2>Ideas not built yet</h2>
+      <p class="lead">Discussed, but waiting for a decision.</p>
+      <ul>
+        <li><strong>SUPPORT alerts for holders.</strong> Options: different wording ("You hold 12 shares of NVDA. It has reached SUPPORT level: a chance to buy more at a lower price."), no SUPPORT alert for holders, or a per-user setting such as <code>/alerts support:holders|everyone</code>.</li>
+        <li><strong>Arena bots that re-tune.</strong> A failing bot could try other settings for its strategy. To stay honest: choose the settings on the earlier years only, require a pass on the later years, then the usual 40-day live proving.</li>
+        <li><strong>Backup file ending.</strong> Backups use <code>.strojanka_backup</code>. The original request said <code>.storjanka_backup</code>, which was taken as a typo.</li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+<footer>Strojanka 0.2.1 · Signals are statistical estimates from past prices, not financial advice.</footer>
+
+<button class="theme-toggle" type="button" id="theme-toggle" aria-label="Switch light or dark theme">◐ Theme</button>
+<script>
+  (function () {
+    var root = document.documentElement;
+    try {
+      var saved = localStorage.getItem('strojanka-guide-theme');
+      if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+    } catch (e) {}
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      var current = root.getAttribute('data-theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      var next = current === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('strojanka-guide-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>
