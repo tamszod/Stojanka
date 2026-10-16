@@ -18,15 +18,15 @@ trading history and your profit.
 - **Writes a report when you add a stock:** what kind of stock it is, where its support and resistance are, and how accurate the bot's calls would have been in the past.
 - **Learns each stock's behaviour.** It tunes its settings separately for every stock, re-checks them every day, and grades every alert it sent. If its alerts for a stock keep being wrong, it becomes stricter for that stock.
 - **Sends alerts as direct messages:**
-  - *FCX has reached PEAK. You have 0.858291457 shares. It is time to sell.* (only sent if you own the stock)
-  - *FCX has reached SUPPORT level. It is time to buy.*
+  - *FCX (Freeport-McMoRan) has reached PEAK. You have 0.858291457 shares. It is time to sell.* (only sent if you own the stock)
+  - *FCX (Freeport-McMoRan) has reached SUPPORT level. It is time to buy.*
 
 - **Has a small built-in AI, Pythia**, that runs on your processor and is tested honestly on
   years it never saw.
 - **Runs a trading-bot arena.** Thirteen bots named after Greek and Roman gods trade $1,000 of play
   money each. Only the ones that prove themselves on years of old prices *and* months of live
   prices report their trades and profits in your Discord server.
-- **Tracks politician stock trades.** Checks daily for newly disclosed US Senate stock trades and
+- **Tracks politician stock trades.** Checks daily for newly disclosed US Congress stock trades and
   posts them in your Discord server; you can also watch a specific politician.
 
 ## Guides
@@ -38,7 +38,7 @@ trading history and your profit.
 | [Commands](commands.md) | Everything you can type in Discord |
 | [Pythia, the built-in AI](pythia.md) | What the AI model predicts, how it is tested, and how well it does |
 | [The arena](arena.md) | Trading bots with $1,000 of play money, and how they prove themselves |
-| [Politician trades](politicians.md) | Tracking US Senate stock trade disclosures |
+| [Politician trades](politicians.md) | Tracking US Congress stock trade disclosures |
 | [How the signals work](how-signals-work.md) | PEAK, SUPPORT, stock categories and how the bot learns |
 | [Building from source](building.md) | Developers: building, testing, versioning |
 

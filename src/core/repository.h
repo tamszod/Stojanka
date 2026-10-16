@@ -95,6 +95,7 @@ public:
     // or notify about exactly those, never ones already seen on an earlier run.
     std::vector<PoliticianTradeRecord> add_politician_trades(const std::vector<PoliticianTradeRecord>& trades);
     bool has_politician_filing(const std::string& report_id);  // true if any trade from it is stored
+    bool has_politician_trades_in(const std::string& chamber);  // "Senate" / "House": anything stored yet
     void mark_politician_trade_public(int64_t id);
     // name_filter: "" for everyone, otherwise a case-insensitive substring of "First Last".
     std::vector<PoliticianTradeRecord> recent_politician_trades(const std::string& name_filter, int limit);
@@ -104,6 +105,8 @@ public:
     bool remove_politician_watch(const std::string& user_id, const std::string& politician);   // false if not watched
     std::vector<std::string> user_politician_watchlist(const std::string& user_id);
     std::vector<std::string> politician_watchers(const std::string& politician);  // normalized name match
+    // Users whose watched name's every word is in `full_name` ("pelosi" matches Nancy Pelosi).
+    std::vector<std::string> politician_watchers_for(const std::string& full_name);
 
     // screener
     // Replaces all screener results with `results` in one transaction.

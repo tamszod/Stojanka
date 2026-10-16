@@ -87,6 +87,9 @@ public:
 
     // Stocks and ETFs matching a ticker or name, for "did you mean" replies.
     std::vector<SymbolMatch> search_symbols(const std::string& query) { return provider_.search(query); }
+    // The same ticker on the main exchanges (HEAL -> HEAL.L, HEAL.DE, ...): only listings that exist.
+    // Symbol search often misses European listings of a ticker that also trades in the US.
+    std::vector<SymbolMatch> probe_listings(const std::string& base);
 
     // Current weight of news in the scores (learned, starts at news::kDefaultNewsWeight).
     double news_weight();

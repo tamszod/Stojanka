@@ -172,7 +172,7 @@ The built-in AI model: how well it did on years it never saw, and today's stocks
 highest chance of a rise or a fall. As text: `pythia` or `ai`. See [Pythia](pythia.md).
 
 ## /politicians and /politicians name:Pelosi
-Recent US Senate stock trade disclosures: everyone's, or just one politician's. As text:
+Recent US Congress stock trade disclosures (House, and the Senate when its site can be reached), newest filings first: everyone's, or just one politician's. As text:
 `politicians` or `politicians Pelosi`. See [politician trades](politicians.md).
 
 ## /admin (admins only)
@@ -199,7 +199,7 @@ automatically an admin.** They can add others, and every admin receives the bot'
 ## Alerts
 Alerts arrive as direct messages:
 
-- **PEAK**: *FCX has reached PEAK. You have 0.858291457 shares. It is time to sell.* You only get this if you own shares.
-- **SUPPORT**: *FCX has reached SUPPORT level. It is time to buy.* Everyone watching the stock gets this.
+- **PEAK**: *FCX (Freeport-McMoRan) has reached PEAK. You have 0.858291457 shares. It is time to sell.* You only get this if you own shares.
+- **SUPPORT**: *FCX (Freeport-McMoRan) has reached SUPPORT level. It is time to buy.* Everyone watching the stock gets this.
 
 You get at most one alert per swing.

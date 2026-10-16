@@ -110,6 +110,26 @@ void MonitorService::run_cycle() {
     learn_news_weight();
 }
 
+std::vector<SymbolMatch> MonitorService::probe_listings(const std::string& base) {
+    static const std::pair<const char*, const char*> kExchanges[] = {
+        {".L", "London"}, {".DE", "Xetra"}, {".AS", "Amsterdam"}, {".PA", "Paris"}, {".MI", "Milan"},
+        {".SW", "Swiss"}, {".BD", "Budapest"}, {"", "US"}};
+    std::vector<std::future<std::optional<SymbolMatch>>> jobs;
+    for (const auto& [suffix, exchange] : kExchanges) {
+        jobs.push_back(std::async(std::launch::async, [this, symbol = base + suffix, exchange]() -> std::optional<SymbolMatch> {
+            std::string error;
+            auto data = provider_.fetch(symbol, HistoryRange::Month, &error);
+            if (!data || data->bars.empty()) return std::nullopt;
+            return SymbolMatch{symbol, data->name, data->is_fund() ? "ETF" : "EQUITY", exchange};
+        }));
+    }
+    std::vector<SymbolMatch> found;
+    for (auto& j : jobs) {
+        if (auto m = j.get()) found.push_back(std::move(*m));
+    }
+    return found;
+}
+
 CycleStats MonitorService::last_cycle() {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     return stats_;
@@ -320,9 +340,9 @@ void MonitorService::emit(const std::string& symbol, const StockReport& report, 
         if (side == SignalSide::Peak) {
             const Position pos = compute_position(repo_.transactions(user, symbol));
             if (!pos.has_shares()) continue;
-            message = peak_alert(symbol, pos.shares, s.last_price, s.currency, s.resistance_level, score, report.learning);
+            message = peak_alert(symbol, s.name, pos.shares, s.last_price, s.currency, s.resistance_level, score, report.learning);
         } else {
-            message = support_alert(symbol, s.last_price, s.currency, s.support_level, score, report.learning);
+            message = support_alert(symbol, s.name, s.last_price, s.currency, s.support_level, score, report.learning);
         }
         if (!report.is_fund()) message += "\n" + news_alert_line(report.news);
         if (report.pythia.valid) message += "\n" + pythia_line(report.pythia);

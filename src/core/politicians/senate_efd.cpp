@@ -32,15 +32,6 @@ std::string lower(std::string s) {
     return s;
 }
 
-// "MM/DD/YYYY" (or already "YYYY-MM-DD") -> "YYYY-MM-DD"; anything else is returned unchanged
-// so a format surprise shows up as odd-looking data rather than silently vanishing.
-std::string normalize_date(const std::string& raw) {
-    const std::string s = trim(raw);
-    if (s.size() == 10 && s[2] == '/' && s[5] == '/') return s.substr(6, 4) + "-" + s.substr(0, 2) + "-" + s.substr(3, 2);
-    if (s.size() == 10 && s[4] == '-' && s[7] == '-') return s;
-    return s;
-}
-
 std::string iso_to_mdy(const std::string& iso) {
     if (iso.size() != 10 || iso[4] != '-' || iso[7] != '-') return iso;
     return iso.substr(5, 2) + "/" + iso.substr(8, 2) + "/" + iso.substr(0, 4);
@@ -54,31 +45,6 @@ int parse_int_or(const std::string& text, int fallback) {
     return digits.empty() ? fallback : std::atoi(digits.c_str());
 }
 
-double parse_dollars(std::string text) {
-    std::string digits;
-    bool dot = false;
-    for (char c : text) {
-        if (std::isdigit(static_cast<unsigned char>(c))) digits.push_back(c);
-        else if (c == '.' && !dot) {
-            digits.push_back(c);
-            dot = true;
-        }
-    }
-    return digits.empty() ? 0.0 : std::atof(digits.c_str());
-}
-
-// "$1,001 - $15,000" -> {1001, 15000}; "Over $50,000,000" / "$50,000,000+" -> {50000000, nullopt}.
-std::pair<double, std::optional<double>> parse_amount_range(const std::string& text) {
-    const std::string low = lower(text);
-    const bool open_ended = low.find("over") != std::string::npos || low.find("more than") != std::string::npos ||
-                            low.find('+') != std::string::npos;
-    const auto dash = text.find_first_of("-\xE2");  // '-' or the first byte of an en/em dash
-    if (!open_ended && dash != std::string::npos) {
-        return {parse_dollars(text.substr(0, dash)), parse_dollars(text.substr(dash + 1))};
-    }
-    const double v = parse_dollars(text);
-    return {v, open_ended ? std::optional<double>() : std::optional<double>(v)};
-}
 
 // Finds every top-level (non-nested) <tag ...> ... </tag> block, case-insensitively.
 std::vector<std::pair<size_t, size_t>> find_blocks(const std::string& lower_html, const std::string& tag) {
@@ -165,8 +131,8 @@ std::string field_for(const std::string& key) {
 
 }  // namespace
 
-std::vector<SenateTrade> parse_transaction_table(const std::string& html, const std::string& report_id) {
-    std::vector<SenateTrade> out;
+std::vector<DisclosedTrade> parse_transaction_table(const std::string& html, const std::string& report_id) {
+    std::vector<DisclosedTrade> out;
     const std::string lower_html = lower(html);
 
     // Pick the table whose header names "transaction"/"owner"/"ticker"/"amount", or failing
@@ -204,7 +170,7 @@ std::vector<SenateTrade> parse_transaction_table(const std::string& html, const 
         for (size_t c = 0; c < cells.size() && c < field_names.size(); ++c) {
             if (!field_names[c].empty()) fields[field_names[c]] = cells[c];
         }
-        SenateTrade t;
+        DisclosedTrade t;
         t.report_id = report_id;
         t.item_number = parse_int_or(fields["item_number"], static_cast<int>(r));
         t.transaction_date = normalize_date(fields["transaction_date"]);
@@ -335,8 +301,8 @@ bool SenateEfdClient::start(std::string* error) {
         return false;
     }
     if (landing.status == 403) {
-        if (error) *error = "the Senate site refused the connection (HTTP 403) -- it blocks some cloud/datacenter networks; "
-                           "this usually works from an ordinary home or office connection instead";
+        if (error) *error = "the Senate site refused the connection (HTTP 403): its bot protection blocks this network "
+                           "(it has refused connections from outside the US); House trades are still checked";
         return false;
     }
     if (landing.status != 200) {
@@ -419,8 +385,8 @@ std::vector<FilingRef> SenateEfdClient::list_filings(const std::string& start_da
     return out;
 }
 
-std::vector<SenateTrade> SenateEfdClient::fetch_filing(const FilingRef& ref, std::string* error) {
-    std::vector<SenateTrade> out;
+std::vector<DisclosedTrade> SenateEfdClient::fetch_filing(const FilingRef& ref, std::string* error) {
+    std::vector<DisclosedTrade> out;
     if (!ref.electronic || ref.url.empty()) return out;  // paper filing: nothing we can parse
     const auto res = session_->get(ref.url, kSearchPageUrl);
     if (!res.ok || res.status != 200) {

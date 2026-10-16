@@ -1,6 +1,8 @@
 #include "core/repository.h"
 
 #include <algorithm>
+#include <cctype>
+#include <set>
 
 #include "common/strings.h"
 
@@ -631,6 +633,13 @@ bool Repository::has_politician_filing(const std::string& report_id) {
     return st.step();
 }
 
+bool Repository::has_politician_trades_in(const std::string& chamber) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT 1 FROM politician_trades WHERE chamber = ?1 LIMIT 1;");
+    st.bind(1, chamber);
+    return st.step();
+}
+
 void Repository::mark_politician_trade_public(int64_t id) {
     Lock lock(db_.mutex());
     auto st = db_.prepare("UPDATE politician_trades SET public = 1 WHERE id = ?1;");
@@ -671,7 +680,7 @@ std::vector<PoliticianTradeRecord> Repository::recent_politician_trades(const st
     Lock lock(db_.mutex());
     std::string sql = std::string("SELECT ") + kPoliticianTradeColumns + " FROM politician_trades";
     if (!name_filter.empty()) sql += " WHERE lower(first_name || ' ' || last_name) LIKE ?1";
-    sql += " ORDER BY id DESC LIMIT ?" + std::to_string(name_filter.empty() ? 1 : 2) + ";";
+    sql += " ORDER BY filed_date DESC, transaction_date DESC, id DESC LIMIT ?" + std::to_string(name_filter.empty() ? 1 : 2) + ";";
     auto st = db_.prepare(sql);
     if (!name_filter.empty()) st.bind(1, "%" + to_lower(name_filter) + "%").bind(2, limit);
     else st.bind(1, limit);
@@ -715,6 +724,35 @@ std::vector<std::string> Repository::politician_watchers(const std::string& poli
     auto st = db_.prepare("SELECT discord_id FROM politician_watch WHERE politician = ?1;");
     st.bind(1, politician);
     return collect_strings(st);
+}
+
+namespace {
+// Lower-case words without punctuation: "Hon. Richard W. Allen" -> {hon, richard, w, allen}.
+std::set<std::string> name_words(const std::string& name) {
+    std::set<std::string> words;
+    std::string cur;
+    for (unsigned char c : to_lower(name) + " ") {
+        if (std::isalnum(c) || c >= 0x80) cur.push_back(static_cast<char>(c));
+        else if (!cur.empty()) {
+            words.insert(cur);
+            cur.clear();
+        }
+    }
+    return words;
+}
+}  // namespace
+
+std::vector<std::string> Repository::politician_watchers_for(const std::string& full_name) {
+    const auto have = name_words(full_name);
+    std::vector<std::string> users;
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT discord_id, politician FROM politician_watch ORDER BY discord_id;");
+    while (st.step()) {
+        const auto want = name_words(st.text(1));
+        const bool match = !want.empty() && std::all_of(want.begin(), want.end(), [&](const std::string& w) { return have.count(w) > 0; });
+        if (match && (users.empty() || users.back() != st.text(0))) users.push_back(st.text(0));
+    }
+    return users;
 }
 
 void Repository::replace_screen_results(const std::vector<ScreenResult>& results) {

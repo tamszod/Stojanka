@@ -4,8 +4,12 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <cstdint>
 #include <iostream>
+#include <iterator>
 #include <map>
+
+#include <zlib.h>
 #include <random>
 #include <string>
 #include <vector>
@@ -35,6 +39,9 @@
 #include "core/log.h"
 #include "core/ml/gbdt.h"
 #include "core/ml/pythia.h"
+#include "core/archive.h"
+#include "core/pdf_crypto.h"
+#include "core/politicians/house_clerk.h"
 #include "core/politicians/politician_service.h"
 #include "core/politicians/senate_efd.h"
 #include "core/server_console.h"
@@ -1019,14 +1026,16 @@ void test_politician_repository(const fs::path& dir) {
     CHECK(repo.politician_watchers("jane doe").size() == 1);
 }
 
-class FakeSenateSource : public politicians::SenateSource {
+class FakeDisclosureSource : public politicians::DisclosureSource {
 public:
+    std::string name = "House";
     bool start_ok = true;
     std::string start_error;
     std::vector<politicians::FilingRef> filings;
-    std::map<std::string, std::vector<politicians::SenateTrade>> trades_by_report;
+    std::map<std::string, std::vector<politicians::DisclosedTrade>> trades_by_report;
     int start_calls = 0, list_calls = 0, fetch_calls = 0;
 
+    std::string chamber() const override { return name; }
     bool start(std::string* error) override {
         ++start_calls;
         if (!start_ok && error) *error = start_error;
@@ -1036,12 +1045,26 @@ public:
         ++list_calls;
         return filings;
     }
-    std::vector<politicians::SenateTrade> fetch_filing(const politicians::FilingRef& ref, std::string*) override {
+    std::vector<politicians::DisclosedTrade> fetch_filing(const politicians::FilingRef& ref, std::string*) override {
         ++fetch_calls;
         const auto it = trades_by_report.find(ref.report_id);
-        return it == trades_by_report.end() ? std::vector<politicians::SenateTrade>{} : it->second;
+        return it == trades_by_report.end() ? std::vector<politicians::DisclosedTrade>{} : it->second;
     }
 };
+
+politicians::DisclosedTrade disclosed(const std::string& report, int item, const std::string& ticker) {
+    politicians::DisclosedTrade t;
+    t.report_id = report;
+    t.item_number = item;
+    t.transaction_date = "2026-09-20";
+    t.owner = "Spouse";
+    t.ticker = ticker;
+    t.asset_name = ticker + " Inc. - Common Stock";
+    t.transaction_type = "Purchase";
+    t.amount_min = 1001;
+    t.amount_max = 15000;
+    return t;
+}
 
 void test_politician_service(const fs::path& dir) {
     using namespace politicians;
@@ -1049,36 +1072,28 @@ void test_politician_service(const fs::path& dir) {
     migrate_database(db, false);
     Repository repo(db);
     Config config;
-    FakeSenateSource source;
+    FakeDisclosureSource house;
+    FakeDisclosureSource senate;  // blocked, like efdsearch.senate.gov from outside the US
+    senate.name = "Senate";
+    senate.start_ok = false;
+    senate.start_error = "HTTP 403";
 
-    FilingRef electronic;
-    electronic.first_name = "Jane";
-    electronic.last_name = "Doe";
-    electronic.office = "Senator (DE)";
-    electronic.filed_date = "2026-10-01";
-    electronic.report_id = "elec-1";
-    electronic.url = "https://efdsearch.senate.gov/search/view/ptr/elec-1/";
-    electronic.electronic = true;
+    FilingRef first;
+    first.first_name = "Richard W.";
+    first.last_name = "Allen";
+    first.office = "Representative (GA12)";
+    first.filed_date = "2026-10-01";
+    first.report_id = "20035001";
+    first.electronic = true;
     FilingRef paper;
     paper.first_name = "Old";
     paper.last_name = "Timer";
-    paper.report_id = "paper-1";
+    paper.report_id = "8001";
     paper.electronic = false;
-    source.filings = {electronic, paper};
+    house.filings = {first, paper};
+    house.trades_by_report["20035001"] = {disclosed("20035001", 1, "AZO")};
 
-    SenateTrade t;
-    t.report_id = "elec-1";
-    t.item_number = 1;
-    t.transaction_date = "2026-09-20";
-    t.owner = "Self";
-    t.ticker = "AAPL";
-    t.asset_name = "Apple Inc.";
-    t.transaction_type = "Purchase";
-    t.amount_min = 1001;
-    t.amount_max = 15000;
-    source.trades_by_report["elec-1"] = {t};
-
-    PoliticianService service(repo, source, config);
+    PoliticianService service(repo, {&house, &senate}, config);
     std::vector<std::string> announced;
     std::vector<std::pair<std::string, std::string>> dmed;
     service.set_announcer([&](const std::string& m) { announced.push_back(m); });
@@ -1090,29 +1105,167 @@ void test_politician_service(const fs::path& dir) {
     } notifier;
     notifier.dmed = &dmed;
     service.set_notifier(&notifier);
+    repo.add_politician_watch("by_last_name", "allen");
+    repo.add_politician_watch("by_full_name", "richard allen");
+    repo.add_politician_watch("someone_else", "nancy pelosi");
 
-    repo.add_politician_watch("watcher1", "jane doe");
-
+    // First check of the House: stored quietly (60 days at once would flood the channel); the
+    // blocked Senate doesn't stop it, and the paper filing is never downloaded.
     CHECK(service.tick() == 1);
-    CHECK(source.start_calls == 1 && source.list_calls == 1 && source.fetch_calls == 1);  // paper filing never fetched
-    CHECK(announced.size() == 1);
-    CHECK(announced[0].find("Jane Doe") != std::string::npos);
-    CHECK(announced[0].find("AAPL") != std::string::npos);
-    CHECK(dmed.size() == 1 && dmed[0].first == "watcher1");
-    CHECK(repo.recent_politician_trades("", 10).size() == 1);
-    CHECK(repo.recent_politician_trades("", 10).front().is_public);
+    CHECK(house.fetch_calls == 1);
+    CHECK(senate.start_calls == 1 && senate.list_calls == 0);
+    CHECK(announced.empty() && dmed.empty());
+    auto stored = repo.recent_politician_trades("", 10);
+    CHECK(stored.size() == 1 && stored.front().chamber == "House" && !stored.front().is_public);
 
-    // Running again does not re-fetch the already-ingested filing, and announces nothing new.
+    // A filing that appears later is announced once, with all its trades, and sent to watchers.
+    FilingRef second = first;
+    second.report_id = "20035002";
+    second.filed_date = "2026-10-14";
+    house.filings.push_back(second);
+    house.trades_by_report["20035002"] = {disclosed("20035002", 1, "COST"), disclosed("20035002", 2, "NVDA")};
+    CHECK(service.tick() == 2);
+    CHECK(announced.size() == 1);
+    if (!announced.empty()) {
+        CHECK(announced[0].find("Richard W. Allen") != std::string::npos);
+        CHECK(announced[0].find("disclosed 2 trades filed 2026-10-14") != std::string::npos);
+        CHECK(announced[0].find("**COST**") != std::string::npos && announced[0].find("**NVDA**") != std::string::npos);
+        CHECK(announced[0].find("Spouse, $1,001 - $15,000") != std::string::npos);
+    }
+    CHECK(dmed.size() == 2);  // "allen" and "richard allen" match Richard W. Allen; "nancy pelosi" doesn't
+    CHECK(house.fetch_calls == 2);  // the first filing is not downloaded again
+
     CHECK(service.tick() == 0);
-    CHECK(source.fetch_calls == 1);
-    CHECK(announced.size() == 1);
+    CHECK(announced.size() == 1 && house.fetch_calls == 2);
 
-    // A failed handshake (e.g. the Akamai block) is handled gracefully, not thrown.
-    FakeSenateSource failing;
-    failing.start_ok = false;
-    failing.start_error = "HTTP 403";
-    PoliticianService failing_service(repo, failing, config);
-    CHECK(failing_service.tick() == 0);
+    // Watch matching: every word typed must be in the name.
+    CHECK(repo.politician_watchers_for("Hon. Richard W. Allen").size() == 2);
+    CHECK(repo.politician_watchers_for("Rick Allen").size() == 1);  // only the last-name watch
+    CHECK(repo.politician_watchers_for("Nancy Pelosi") == std::vector<std::string>{"someone_else"});
+
+    // A long filing is cut to ten lines in one message.
+    std::vector<PoliticianTradeRecord> many(12, stored.front());
+    const std::string long_message = format_filing_announcement(many);
+    CHECK(long_message.find("...and 2 more: `/politicians name:Allen`") != std::string::npos);
+    CHECK(long_message.size() < 2000);
+}
+
+std::string read_fixture(const std::string& name) {
+    std::ifstream f(utf8_path(std::string(STROJANKA_TEST_FIXTURES) + "/" + name), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
+// A one-file ZIP made here with zlib, so the reader is tested without a binary fixture.
+std::string make_zip(const std::string& name, const std::string& content) {
+    std::string deflated(compressBound(static_cast<uLong>(content.size())) + 64, '\0');
+    z_stream zs{};
+    deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(content.data()));
+    zs.avail_in = static_cast<uInt>(content.size());
+    zs.next_out = reinterpret_cast<Bytef*>(deflated.data());
+    zs.avail_out = static_cast<uInt>(deflated.size());
+    deflate(&zs, Z_FINISH);
+    deflated.resize(zs.total_out);
+    deflateEnd(&zs);
+    auto u16 = [](uint32_t v) { return std::string{static_cast<char>(v & 0xFF), static_cast<char>((v >> 8) & 0xFF)}; };
+    auto u32 = [&](uint32_t v) { return u16(v & 0xFFFF) + u16(v >> 16); };
+    const uint32_t crc = static_cast<uint32_t>(crc32(0, reinterpret_cast<const Bytef*>(content.data()), static_cast<uInt>(content.size())));
+    const auto csize = static_cast<uint32_t>(deflated.size()), usize = static_cast<uint32_t>(content.size());
+    std::string zip = u32(0x04034b50) + u16(20) + u16(0) + u16(8) + u16(0) + u16(0) + u32(crc) + u32(csize) + u32(usize) +
+                      u16(static_cast<uint32_t>(name.size())) + u16(0) + name + deflated;
+    const auto central = static_cast<uint32_t>(zip.size());
+    std::string cd = u32(0x02014b50) + u16(20) + u16(20) + u16(0) + u16(8) + u16(0) + u16(0) + u32(crc) + u32(csize) + u32(usize) +
+                     u16(static_cast<uint32_t>(name.size())) + u16(0) + u16(0) + u16(0) + u16(0) + u32(0) + u32(0) + name;
+    zip += cd + u32(0x06054b50) + u16(0) + u16(0) + u16(1) + u16(1) + u32(static_cast<uint32_t>(cd.size())) + u32(central) + u16(0);
+    return zip;
+}
+
+void test_house_disclosures() {
+    using namespace politicians;
+    // ZIP reader with a deflated entry, and its error paths.
+    const std::string text(5000, 'x');
+    std::string zerr;
+    const auto got = zip_entry(make_zip("2026FD.txt", text), "fd.TXT", &zerr);
+    CHECK(got.has_value() && *got == text);
+    CHECK(!zip_entry(make_zip("2026FD.xml", text), "FD.txt", &zerr).has_value() && zerr.find("no file ending") != std::string::npos);
+    CHECK(!zip_entry("not a zip", "FD.txt", &zerr).has_value());
+
+    // The yearly index: trade reports ("P") only, in the date range; Windows-1252 names.
+    const std::string index =
+        "Prefix\tLast\tFirst\tSuffix\tFilingType\tStateDst\tYear\tFilingDate\tDocID\r\n"
+        "Hon.\tMeuser\tDaniel\t\tP\tPA09\t2026\t10/14/2026\t20035487\r\n"
+        "\tMac\xED" "as\tMayra\t\tP\tIL04\t2026\t9/5/2026\t9115001\r\n"
+        "Hon.\tAllen\tRichard W.\tJr.\tC\tGA12\t2026\t10/1/2026\t10078673\r\n"
+        "Hon.\tOld\tFiling\t\tP\tTX01\t2026\t1/2/2026\t20030001\r\n";
+    const auto refs = parse_house_index(index, "2026-08-17", "2026-10-16");
+    CHECK(refs.size() == 2);
+    if (refs.size() == 2) {
+        CHECK(refs[0].first_name == "Daniel" && refs[0].last_name == "Meuser" && refs[0].office == "Representative for PA09");
+        CHECK(refs[0].filed_date == "2026-10-14" && refs[0].electronic);
+        CHECK(refs[0].url == "https://disclosures-clerk.house.gov/public_disc/ptr-pdfs/2026/20035487.pdf");
+        CHECK(refs[1].last_name == "Mac\xC3\xAD" "as");  // Macías, converted to UTF-8
+        CHECK(refs[1].filed_date == "2026-09-05" && !refs[1].electronic);  // a scanned paper filing
+    }
+    CHECK(normalize_date("9/5/2026") == "2026-09-05");
+    CHECK(normalize_date("09/18/2026") == "2026-09-18");
+
+    // A real one-trade report (Rep. Daniel Meuser, filed 2026-10-14).
+    std::string err;
+    const auto one = parse_house_ptr(read_fixture("house_ptr_20035487.pdf"), "20035487", &err);
+    CHECK(err.empty());
+    CHECK(one.size() == 1);
+    if (one.size() == 1) {
+        const auto& t = one[0];
+        CHECK(t.ticker == "NVDA");
+        CHECK(t.asset_name == "NVIDIA Corporation - Common Stock (NVDA)");
+        CHECK(t.asset_type == "ST");
+        CHECK(t.owner == "Spouse");
+        CHECK(t.transaction_type == "Sale (Partial)");
+        CHECK(t.transaction_date == "2026-08-31");
+        CHECK(t.amount_min == 1001 && t.amount_max && *t.amount_max == 15000);
+        CHECK(t.item_number == 1 && t.report_id == "20035487");
+    }
+
+    // A real 7-page report with 57 trades (Rep. Gilbert Cisneros): every page is read.
+    const auto many = parse_house_ptr(read_fixture("house_ptr_20035622.pdf"), "20035622", &err);
+    CHECK(err.empty());
+    CHECK(many.size() == 57);
+    if (many.size() == 57) {
+        CHECK(many[0].ticker == "ABT" && many[0].transaction_type == "Purchase" && many[0].owner == "Self");
+        CHECK(many[1].asset_name == "Advanced Energy Industries, Inc. - Common Stock (AEIS)");  // two lines joined
+        CHECK(many[5].ticker == "ATRC" && many[5].transaction_type == "Sale (Partial)");
+        int with_ticker = 0, with_amount = 0, with_date = 0;
+        for (const auto& t : many) {
+            with_ticker += !t.ticker.empty();
+            with_amount += t.amount_min > 0;
+            with_date += t.transaction_date.size() == 10 && t.transaction_date[4] == '-';
+        }
+        CHECK(with_amount == 57 && with_date == 57);
+        CHECK(with_ticker >= 50);  // bonds and funds may have none
+        CHECK(many[56].item_number == 57);
+    }
+    CHECK(parse_house_ptr("not a pdf", "x", &err).empty() && !err.empty());
+
+    // About 15% of reports are RC4-encrypted with an empty password (permissions only).
+    auto hex = [](const std::string& raw) {
+        std::string out;
+        char buf[3];
+        for (unsigned char c : raw) {
+            std::snprintf(buf, sizeof buf, "%02x", c);
+            out += buf;
+        }
+        return out;
+    };
+    CHECK(hex(md5("")) == "d41d8cd98f00b204e9800998ecf8427e");  // RFC 1321 test vectors
+    CHECK(hex(md5("abc")) == "900150983cd24fb0d6963f7d28e17f72");
+    CHECK(hex(md5("12345678901234567890123456789012345678901234567890123456789012345678901234567890")) ==
+          "57edf4a22be3c955ac49da2e2107b67a");
+    CHECK(hex(rc4("Key", "Plaintext")) == "bbf316e8d940af0ad3");  // the classic RC4 test vector
+    err.clear();
+    const auto encrypted = parse_house_ptr(read_fixture("house_ptr_20035370_encrypted.pdf"), "20035370", &err);
+    CHECK(err.empty());
+    CHECK(!encrypted.empty());
+    for (const auto& t : encrypted) CHECK(t.amount_min > 0 && t.transaction_date.size() == 10);
 }
 
 void test_politician_commands(const fs::path& dir) {
@@ -1180,6 +1333,15 @@ void test_company_names() {
     CHECK(utf8_length(etf) <= 14);
     CHECK(short_company_name("NVIDIA Corporation", 14) == "NVIDIA");
     CHECK(utf8_length("\xE2\x82\xAC" "1") == 2);
+
+    // Alerts name the company too; a name that is just the ticker isn't repeated.
+    const StockParamsRecord learning;
+    CHECK(starts_with(peak_alert("NVDA", "NVIDIA Corporation", 1.5, 217.23, "USD", 220, 0.8, learning),
+                      "**NVDA** (NVIDIA) has reached PEAK. You have 1.5 shares. It is time to sell."));
+    CHECK(starts_with(support_alert("OTP.BD", "OTP Bank Nyrt.", 41720, "HUF", 41000, 0.7, learning),
+                      "**OTP.BD** (OTP Bank Nyrt.) has reached SUPPORT level. It is time to buy."));
+    CHECK(starts_with(support_alert("FCX", "FCX Inc.", 50, "USD", 49, 0.7, learning), "**FCX** has reached SUPPORT level."));
+    CHECK(starts_with(support_alert("FCX", "", 50, "USD", 49, 0.7, learning), "**FCX** has reached SUPPORT level."));
 }
 
 void test_previous_run() {
@@ -1257,6 +1419,16 @@ void test_etfs(const fs::path& dir) {
             CHECK_NEAR(isf->bars[0].high, 10.60, 1e-9);
         }
     }
+    // Yahoo answers an empty listing (plain "OTP") with null fields: read it, don't throw.
+    const auto empty = parse_yahoo_chart(R"({"chart":{"result":[{"meta":{"currency":null,"symbol":"OTP","instrumentType":"ETF",
+        "fullExchangeName":"NYSEArca","longName":null,"shortName":null,"regularMarketPrice":0.0,"gmtoffset":null},
+        "indicators":{"quote":[{}]}}],"error":null}})", &err);
+    CHECK(empty.has_value());
+    if (empty) {
+        CHECK(empty->currency == "USD");
+        CHECK(empty->name == "OTP");
+        CHECK(empty->bars.empty());
+    }
     CHECK(major_currency("USD").second == 1.0);
     CHECK(major_currency("ZAc").first == "ZAR");
 
@@ -1284,7 +1456,7 @@ void test_etfs(const fs::path& dir) {
     EtfProvider provider;
     provider.bars = make_bars(cyclical_closes(300, 11));
     provider.listings = {{"CSPX.L", {"USD", "ETF"}}, {"SXR8.DE", {"EUR", "ETF"}}, {"NVDA", {"USD", "EQUITY"}},
-                         {"ISF.L", {"GBP", "ETF"}}};
+                         {"ISF.L", {"GBP", "ETF"}}, {"HEAL.L", {"USD", "ETF"}}, {"HEAL", {"USD", "ETF"}}};
     Config config;
     MonitorService monitor(repo, provider, config);
     CommandService cmd(repo, monitor);
@@ -1296,6 +1468,14 @@ void test_etfs(const fs::path& dir) {
     CHECK(miss.text.find("`CSPX.AS`") != std::string::npos);
     CHECK(miss.text.find("/monitor stock:CSPX.L") != std::string::npos);
     CHECK(cmd.monitor("u1", "NOPE").text.find("Did you mean") == std::string::npos);  // nothing to suggest
+    // A wrong exchange ending: search finds nothing, so the base ticker is tried on the main exchanges.
+    const auto heal = cmd.monitor("u1", "HEAL.G");
+    CHECK(!heal.ok);
+    CHECK(heal.text.find("`.G` isn't an exchange ending") != std::string::npos);
+    CHECK(heal.text.find("`HEAL.L`") != std::string::npos);
+    CHECK(heal.text.find("`HEAL` ") != std::string::npos);  // the US listing of the same ticker too
+    CHECK(heal.text.find("/monitor stock:HEAL.L") != std::string::npos);  // London first
+    CHECK(cmd.monitor("u1", "HEAL.DE").text.find("isn't an exchange ending") == std::string::npos);  // .DE is real
 
     const auto added = cmd.monitor("u1", "CSPX.L");
     CHECK(added.ok);
@@ -1453,6 +1633,7 @@ int main() {
         {"politician trade repository", [&] { test_politician_repository(dir); }},
         {"politician service: fetch, dedup, announce, DM", [&] { test_politician_service(dir); }},
         {"politician commands: monitor/remove/list", [&] { test_politician_commands(dir); }},
+        {"House disclosures: ZIP index, real report PDFs", test_house_disclosures},
         {"payload", [&] { test_payload(dir); }},
         {"previous run: clean, ended by Windows, crashed", test_previous_run},
         {"ETFs: pence, search, European amounts, currencies", [&] { test_etfs(dir); }},

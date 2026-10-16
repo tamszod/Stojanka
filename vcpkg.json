@@ -6,6 +6,7 @@
     "dpp",
     "sqlite3",
     "nlohmann-json",
+    "zlib",
     {
       "name": "curl",
       "default-features": false,

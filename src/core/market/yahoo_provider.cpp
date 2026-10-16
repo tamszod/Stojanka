@@ -16,6 +16,18 @@ double number_or_nan(const nlohmann::json& arr, size_t i) {
     return arr[i].get<double>();
 }
 
+// json::value() throws when the key exists but holds null, which Yahoo does for empty listings
+// (OTP: "currency": null), so read fields only when they have the expected type.
+std::string text_or(const nlohmann::json& obj, const char* key, const std::string& fallback) {
+    const auto it = obj.find(key);
+    return it != obj.end() && it->is_string() ? it->get<std::string>() : fallback;
+}
+
+double number_or(const nlohmann::json& obj, const char* key, double fallback) {
+    const auto it = obj.find(key);
+    return it != obj.end() && it->is_number() ? it->get<double>() : fallback;
+}
+
 }  // namespace
 
 std::pair<std::string, double> major_currency(const std::string& currency) {
@@ -50,6 +62,12 @@ std::optional<ChartData> YahooProvider::fetch(const std::string& symbol, History
     }
     auto data = parse_yahoo_chart(res.body, error);
     if (data && data->symbol.empty()) data->symbol = symbol;
+    if (data && data->bars.empty() && data->last_price <= 0) {
+        // Listed but never priced (plain "OTP" is an empty US fund; the bank is OTP.BD), so
+        // report it like an unknown ticker and let the caller suggest the real listings.
+        if (error) *error = "symbol not found (Yahoo lists " + symbol + " but has no prices for it)";
+        return std::nullopt;
+    }
     return data;
 }
 
@@ -85,7 +103,7 @@ std::optional<ChartData> parse_yahoo_chart(const std::string& body, std::string*
         const auto j = nlohmann::json::parse(body);
         const auto& chart = j.at("chart");
         if (chart.contains("error") && !chart["error"].is_null()) {
-            if (error) *error = chart["error"].value("description", std::string("symbol not found"));
+            if (error) *error = chart["error"].is_object() ? text_or(chart["error"], "description", "symbol not found") : "symbol not found";
             return std::nullopt;
         }
         const auto& results = chart.at("result");
@@ -96,14 +114,14 @@ std::optional<ChartData> parse_yahoo_chart(const std::string& body, std::string*
         const auto& r = results[0];
         const auto& meta = r.at("meta");
         ChartData d;
-        d.symbol = meta.value("symbol", std::string());
-        const auto [currency, divisor] = major_currency(meta.value("currency", std::string("USD")));
+        d.symbol = text_or(meta, "symbol", "");
+        const auto [currency, divisor] = major_currency(text_or(meta, "currency", "USD"));
         d.currency = currency;
-        d.exchange = meta.value("fullExchangeName", meta.value("exchangeName", std::string()));
-        d.instrument_type = meta.value("instrumentType", std::string());
-        d.name = meta.value("longName", meta.value("shortName", d.symbol));
-        d.last_price = meta.value("regularMarketPrice", 0.0) / divisor;
-        const int64_t gmtoffset = meta.value("gmtoffset", static_cast<int64_t>(0));
+        d.exchange = text_or(meta, "fullExchangeName", text_or(meta, "exchangeName", ""));
+        d.instrument_type = text_or(meta, "instrumentType", "");
+        d.name = text_or(meta, "longName", text_or(meta, "shortName", d.symbol));
+        d.last_price = number_or(meta, "regularMarketPrice", 0.0) / divisor;
+        const auto gmtoffset = static_cast<int64_t>(number_or(meta, "gmtoffset", 0.0));
 
         if (!r.contains("timestamp") || !r["timestamp"].is_array()) return d;  // listed but no trading yet
         const auto& ts = r["timestamp"];

@@ -36,26 +36,33 @@ std::string alert_evidence(int correct, int signals, double baseline) {
     return s;
 }
 
+// "**FCX** (Freeport-McMoRan)": the ticker, plus the short company name when it says more.
+std::string stock_label(const std::string& symbol, const std::string& company) {
+    const std::string name = short_company_name(company, 40);
+    if (name.empty() || to_upper(name) == to_upper(symbol)) return "**" + symbol + "**";
+    return "**" + symbol + "** (" + name + ")";
+}
+
 }  // namespace
 
 bool has_proven_edge(int correct, int signals, double baseline) {
     return signals >= kMinCallsForEdge && static_cast<double>(correct) / signals >= baseline + kEdgeMargin;
 }
 
-std::string peak_alert(const std::string& symbol, double shares, double price, const std::string& currency,
-                       double resistance, double strength, const StockParamsRecord& learning) {
+std::string peak_alert(const std::string& symbol, const std::string& company, double shares, double price,
+                       const std::string& currency, double resistance, double strength, const StockParamsRecord& learning) {
     std::ostringstream m;
-    m << "**" << symbol << "** has reached PEAK. You have " << format_shares(shares) << " shares. It is time to sell.\n"
+    m << stock_label(symbol, company) << " has reached PEAK. You have " << format_shares(shares) << " shares. It is time to sell.\n"
       << "Price " << format_money(price, currency) << " (resistance around " << format_money(resistance, currency)
       << "), signal strength " << format_percent(strength, 0) << ".\n"
       << alert_evidence(learning.backtest_peak_correct, learning.backtest_peak_signals, learning.baseline_peak);
     return m.str();
 }
 
-std::string support_alert(const std::string& symbol, double price, const std::string& currency, double support,
-                          double strength, const StockParamsRecord& learning) {
+std::string support_alert(const std::string& symbol, const std::string& company, double price, const std::string& currency,
+                          double support, double strength, const StockParamsRecord& learning) {
     std::ostringstream m;
-    m << "**" << symbol << "** has reached SUPPORT level. It is time to buy.\n"
+    m << stock_label(symbol, company) << " has reached SUPPORT level. It is time to buy.\n"
       << "Price " << format_money(price, currency) << " (support around " << format_money(support, currency)
       << "), signal strength " << format_percent(strength, 0) << ".\n"
       << alert_evidence(learning.backtest_support_correct, learning.backtest_support_signals, learning.baseline_support);

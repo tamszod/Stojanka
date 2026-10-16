@@ -30,6 +30,7 @@ find_package(dpp CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(CURL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # Plain standard-library code shared by everything, including the dependency-free installer.
 set(STROJANKA_COMMON_SOURCES
@@ -73,8 +74,13 @@ add_library(strojanka_core STATIC
   src/core/arena/arena_service.cpp
   src/core/ml/gbdt.cpp
   src/core/ml/pythia.cpp
+  src/core/politicians/disclosure_source.cpp
   src/core/politicians/senate_efd.cpp
+  src/core/politicians/house_clerk.cpp
   src/core/politicians/politician_service.cpp
+  src/core/archive.cpp
+  src/core/pdf_text.cpp
+  src/core/pdf_crypto.cpp
   src/core/http.cpp
   src/core/news/sentiment.cpp
   src/core/news/news_provider.cpp
@@ -87,7 +93,7 @@ add_library(strojanka_core STATIC
   src/core/market/yahoo_provider.cpp
 )
 target_include_directories(strojanka_core PUBLIC src "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(strojanka_core PUBLIC unofficial::sqlite3::sqlite3 nlohmann_json::nlohmann_json CURL::libcurl)
+target_link_libraries(strojanka_core PUBLIC unofficial::sqlite3::sqlite3 nlohmann_json::nlohmann_json CURL::libcurl ZLIB::ZLIB)
 if(WIN32)
   target_link_libraries(strojanka_core PUBLIC dbghelp)
 endif()
@@ -187,6 +193,7 @@ if(STROJANKA_BUILD_TESTS)
   enable_testing()
   add_executable(strojanka_tests tests/test_main.cpp)
   target_link_libraries(strojanka_tests PRIVATE strojanka_core)
+  target_compile_definitions(strojanka_tests PRIVATE STROJANKA_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   add_test(NAME strojanka_tests COMMAND strojanka_tests)
 endif()
 

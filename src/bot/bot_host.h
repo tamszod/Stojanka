@@ -16,7 +16,9 @@
 #include "core/market/yahoo_provider.h"
 #include "core/monitor_service.h"
 #include "core/news/news_provider.h"
+#include "core/politicians/house_clerk.h"
 #include "core/politicians/politician_service.h"
+#include "core/politicians/senate_efd.h"
 #include "core/repository.h"
 #include "core/screener.h"
 #include "core/server_console.h"
@@ -81,6 +83,7 @@ private:
     std::unique_ptr<ml::Pythia> pythia_;
     std::unique_ptr<arena::ArenaService> arena_;
     std::unique_ptr<politicians::SenateEfdClient> senate_;
+    std::unique_ptr<politicians::HouseClerkClient> house_;
     std::unique_ptr<politicians::PoliticianService> politicians_;
     std::unique_ptr<ServerConsole> console_;
     std::unique_ptr<DiscordBot> bot_;

@@ -14,7 +14,9 @@
 #include "common/strings.h"
 #include "common/utf8_path.h"
 #include "core/admin_service.h"
+#include "core/politicians/house_clerk.h"
 #include "core/politicians/politician_service.h"
+#include "core/politicians/senate_efd.h"
 #include "core/arena/arena_service.h"
 #include "core/analysis/walk_forward.h"
 #include "core/commands.h"
@@ -42,7 +44,7 @@ void print_usage() {
               << "  --analyze <SYMBOL> print an analysis report for a stock without starting Discord\n"
               << "  --news <SYMBOL>    print recent headlines with their tone\n"
               << "  --arena            run the trading-bot arena once and print every bot\n"
-              << "  --politicians [name]  check for new US Senate stock trade disclosures and print them\n"
+              << "  --politicians [name]  check for new US House and Senate stock trade disclosures and print them\n"
               << "  --move-db <folder> move the database to another folder or drive (bot must be stopped)\n"
               << "  --suggest [buy|sell] screen the stock list now and print the most predictable stocks\n"
               << "  --backtest <SYMBOL> [SYMBOL...]\n"
@@ -122,15 +124,16 @@ int run_analyze(const Config& config, const std::string& config_path, bool have_
     return reply.ok ? 0 : 1;
 }
 
-// Runs one arena pass (prices, historical tests, live trading) and prints every bot.
+// Checks the House and Senate disclosure sites once and prints the latest trades.
 int run_politicians(const Config& config, const std::string& config_path, bool have_config, const std::string& name_filter) {
     const std::string db_path = have_config ? resolve_config_path(config_path, config.database_path) : ":memory:";
     Database db(db_path);
     migrate_database(db, true);
     Repository repo(db);
-    politicians::SenateEfdClient source;
-    politicians::PoliticianService service(repo, source, config);
-    std::cout << "Checking for new US Senate stock trade disclosures (last 60 days)...\n" << std::flush;
+    politicians::HouseClerkClient house;
+    politicians::SenateEfdClient senate;
+    politicians::PoliticianService service(repo, {&house, &senate}, config);
+    std::cout << "Checking for new US House and Senate stock trade disclosures (last 60 days)...\n" << std::flush;
     const size_t n = service.tick();
     std::cout << n << " new trade(s) found.\n\n";
     YahooProvider provider;

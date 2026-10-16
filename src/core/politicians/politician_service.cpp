@@ -15,8 +15,8 @@ constexpr const char* kLastRunKey = "politicians_last_run";
 
 }  // namespace
 
-PoliticianService::PoliticianService(Repository& repo, SenateSource& source, const Config& config)
-    : repo_(repo), source_(source), config_(config) {}
+PoliticianService::PoliticianService(Repository& repo, std::vector<DisclosureSource*> sources, const Config& config)
+    : repo_(repo), sources_(std::move(sources)), config_(config) {}
 
 PoliticianService::~PoliticianService() { stop(); }
 
@@ -51,48 +51,79 @@ void PoliticianService::stop() {
     if (thread_.joinable()) thread_.join();
 }
 
-size_t PoliticianService::tick() {
-    if (running_.exchange(true)) return 0;
-    struct Reset {
-        std::atomic<bool>& flag;
-        ~Reset() { flag = false; }
-    } reset{running_};
+std::string format_filing_announcement(const std::vector<PoliticianTradeRecord>& trades, size_t max_lines) {
+    if (trades.empty()) return {};
+    const auto& first = trades.front();
+    std::ostringstream m;
+    m << "\xF0\x9F\x8F\x9B\xEF\xB8\x8F **" << first.full_name() << "**";
+    if (!first.office.empty()) m << ", " << first.office << ",";
+    m << " disclosed " << trades.size() << " trade" << (trades.size() == 1 ? "" : "s")
+      << (first.filed_date.empty() ? "" : " filed " + first.filed_date) << ":";
+    for (size_t i = 0; i < trades.size() && i < max_lines; ++i) {
+        const auto& t = trades[i];
+        const bool has_ticker = !t.ticker.empty() && t.ticker != "--";
+        m << "\n- " << (t.transaction_type.empty() ? "Transaction" : t.transaction_type) << " **"
+          << (has_ticker ? t.ticker : short_company_name(t.asset_name, 48)) << "**";
+        if (has_ticker && !t.asset_name.empty()) m << " (" << short_company_name(t.asset_name, 40) << ")";
+        m << ", " << (t.owner.empty() ? "Self" : t.owner) << ", " << format_whole_money(t.amount_min)
+          << (t.amount_max ? " - " + format_whole_money(*t.amount_max) : "+");
+        if (!t.transaction_date.empty()) m << ", traded " << t.transaction_date;
+    }
+    if (trades.size() > max_lines) {
+        m << "\n...and " << trades.size() - max_lines << " more: `/politicians name:" << first.last_name << "`";
+    }
+    return m.str();
+}
 
+void PoliticianService::announce_filing(const std::vector<PoliticianTradeRecord>& trades) {
+    if (trades.empty()) return;
+    const std::string message = format_filing_announcement(trades);
+    if (announcer_) announcer_(message);
+    for (const auto& t : trades) repo_.mark_politician_trade_public(t.id);
+    if (notifier_) {
+        for (const auto& user : repo_.politician_watchers_for(trades.front().full_name())) notifier_->send_direct(user, message);
+    }
+}
+
+size_t PoliticianService::check(DisclosureSource& source) {
+    const std::string chamber = source.chamber();
     std::string error;
-    if (!source_.start(&error)) {
-        log_warn("politicians: " + error);
+    if (!source.start(&error)) {
+        log_warn("politicians (" + chamber + "): " + error);
         return 0;
     }
     const std::string today = unix_to_date(unix_now());
     const std::string since = unix_to_date(unix_now() - static_cast<int64_t>(kLookbackDays) * 86400);
-    auto filings = source_.list_filings(since, today, &error);
+    const auto filings = source.list_filings(since, today, &error);
     if (!error.empty()) {
-        log_warn("politicians: " + error);
+        log_warn("politicians (" + chamber + "): " + error);
         return 0;
     }
-    log_info("politicians: " + std::to_string(filings.size()) + " Senate filings in the last " + std::to_string(kLookbackDays) +
-             " days");
+    // A first check would otherwise announce 60 days of filings at once.
+    const bool quiet = !repo_.has_politician_trades_in(chamber);
+    log_info("politicians (" + chamber + "): " + std::to_string(filings.size()) + " filings in the last " +
+             std::to_string(kLookbackDays) + " days" + (quiet ? "; first check, storing them without announcing" : ""));
 
-    std::vector<PoliticianTradeRecord> all_new;
+    size_t added_total = 0;
     int skipped_paper = 0, fetch_errors = 0;
     for (const auto& ref : filings) {
         if (!ref.electronic) {
             ++skipped_paper;
             continue;
         }
-        if (repo_.has_politician_filing(ref.report_id)) continue;  // already ingested on an earlier run
+        if (repo_.has_politician_filing(ref.report_id)) continue;  // already stored on an earlier run
         std::string fetch_error;
-        const auto trades = source_.fetch_filing(ref, &fetch_error);
+        const auto trades = source.fetch_filing(ref, &fetch_error);
         if (!fetch_error.empty()) {
             ++fetch_errors;
-            log_warn("politicians: " + fetch_error);
+            log_warn("politicians (" + chamber + "): " + fetch_error);
             continue;
         }
         const std::string fetched_at = utc_now_iso();
         std::vector<PoliticianTradeRecord> records;
         for (const auto& t : trades) {
             PoliticianTradeRecord r;
-            r.chamber = "Senate";
+            r.chamber = chamber;
             r.first_name = ref.first_name;
             r.last_name = ref.last_name;
             r.office = ref.office;
@@ -112,38 +143,32 @@ size_t PoliticianService::tick() {
             records.push_back(std::move(r));
         }
         const auto added = repo_.add_politician_trades(records);
-        all_new.insert(all_new.end(), added.begin(), added.end());
+        added_total += added.size();
+        if (!quiet) announce_filing(added);
     }
+    std::string summary = "politicians (" + chamber + "): " + std::to_string(added_total) + " new trade(s)";
+    if (skipped_paper) summary += ", " + std::to_string(skipped_paper) + " paper filing(s) skipped";
+    if (fetch_errors) summary += ", " + std::to_string(fetch_errors) + " filing(s) failed";
+    log_info(summary);
+    return added_total;
+}
 
-    for (const auto& t : all_new) {
-        const std::string name = t.full_name();
-        const bool has_ticker = !t.ticker.empty() && t.ticker != "--";
-        std::ostringstream m;
-        m << "\xF0\x9F\x8F\x9B\xEF\xB8\x8F **" << name << "**";
-        if (!t.office.empty()) m << " (" << t.office << ")";
-        m << " disclosed a trade" << (t.filed_date.empty() ? "" : " filed " + t.filed_date) << ":\n"
-          << "- " << (t.transaction_type.empty() ? "Transaction" : t.transaction_type) << " **"
-          << (has_ticker ? t.ticker : t.asset_name) << "**";
-        if (has_ticker && !t.asset_name.empty()) m << " (" << t.asset_name << ")";
-        m << ", " << (t.owner.empty() ? "Self" : t.owner) << ", " << format_money(t.amount_min)
-          << (t.amount_max ? " - " + format_money(*t.amount_max) : "+");
-        if (!t.transaction_date.empty()) m << ", traded " << t.transaction_date;
-        m << ".";
-        const std::string message = m.str();
-
-        if (announcer_) announcer_(message);
-        repo_.mark_politician_trade_public(t.id);
-
-        for (const auto& user : repo_.politician_watchers(to_lower(trim(name)))) {
-            if (notifier_) notifier_->send_direct(user, message);
+size_t PoliticianService::tick() {
+    if (running_.exchange(true)) return 0;
+    struct Reset {
+        std::atomic<bool>& flag;
+        ~Reset() { flag = false; }
+    } reset{running_};
+    size_t total = 0;
+    for (DisclosureSource* source : sources_) {
+        try {
+            total += check(*source);
+        } catch (const std::exception& e) {
+            log_error("politicians (" + source->chamber() + ") failed: " + e.what());
         }
     }
     repo_.set_meta(kLastRunKey, utc_now_iso());
-    std::string summary = "politicians: " + std::to_string(all_new.size()) + " new trade(s)";
-    if (skipped_paper) summary += ", " + std::to_string(skipped_paper) + " paper filing(s) skipped";
-    if (fetch_errors) summary += ", " + std::to_string(fetch_errors) + " filing(s) failed to fetch";
-    log_info(summary);
-    return all_new.size();
+    return total;
 }
 
 }  // namespace strojanka::politicians

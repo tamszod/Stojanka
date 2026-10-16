@@ -14,10 +14,11 @@ bool has_proven_edge(int correct, int signals, double baseline);
 
 // Alert texts. The first sentence of each follows the wording agreed in the task spec;
 // the following lines give the evidence, including the honest historical hit rate.
-std::string peak_alert(const std::string& symbol, double shares, double price, const std::string& currency,
-                       double resistance, double strength, const StockParamsRecord& learning);
-std::string support_alert(const std::string& symbol, double price, const std::string& currency, double support,
-                          double strength, const StockParamsRecord& learning);
+// The alerts name the stock as "**FCX** (Freeport-McMoRan)": `company` is its full name, shortened here.
+std::string peak_alert(const std::string& symbol, const std::string& company, double shares, double price,
+                       const std::string& currency, double resistance, double strength, const StockParamsRecord& learning);
+std::string support_alert(const std::string& symbol, const std::string& company, double price, const std::string& currency,
+                          double support, double strength, const StockParamsRecord& learning);
 
 // Multi-line analysis report shown by /monitor and /report.
 std::string format_report(const StockReport& report);

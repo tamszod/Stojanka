@@ -37,8 +37,8 @@ std::string ServerConsole::help() const {
            "`as <user ID> <command>` - run a Discord command as that user, e.g. `as 3550... status`\n"
            "`arena` - all trading bots, including private ones | `arena Athena` - one bot in detail\n"
            "`arena run` - trade and re-judge now | `arena channel <channel ID>` - where public bots report\n"
-           "`politicians` - recent US Senate stock trades | `politicians Pelosi` - one politician's trades\n"
-           "`politicians run` - check for new Senate filings now | `politicians channel <channel ID>` - same public channel\n"
+           "`politicians` - recent US Congress stock trades | `politicians Pelosi` - one politician's trades\n"
+           "`politicians run` - check for new House and Senate filings now | `politicians channel <channel ID>` - same public channel\n"
            "`admin add <user ID>` | `admin remove <user ID>` | `admin movedb <folder>` - admin commands\n"
            "`loglevel debug|info|warn|error` - how much the log shows\n"
            "`version` | `clear` | `help`";
@@ -166,7 +166,8 @@ CommandReply ServerConsole::run(const std::string& line) {
         if (politicians_sub == "run") {
             if (politicians_->busy()) return {false, "A politician trade check is already running."};
             const size_t n = politicians_->tick();
-            return {true, "Checked for new Senate filings: " + std::to_string(n) + " new trade(s). Type `politicians` to see them."};
+            return {true, "Checked for new House and Senate filings: " + std::to_string(n) +
+                              " new trade(s). Type `politicians` to see them; the log says what each source did."};
         }
         return commands_.run_text("console", line);
     }

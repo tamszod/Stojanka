@@ -56,7 +56,7 @@ CommandReply CommandService::help() const {
       << "`/news stock:FCX` - recent headlines, their tone, and how news affects the signals\n"
       << "`/arena` - the paper-trading bots ($1,000 each) and how they are doing; `/arena bot:Athena` for one bot\n"
       << "`/pythia` - the built-in AI model: how well it did on years it never saw, and today's strongest candidates\n"
-      << "`/politicians` - recent US Senate stock trades; `monitor politician:Pelosi` to watch one personally (DM on a new trade)\n"
+      << "`/politicians` - recent US Congress stock trades; `monitor politician:Pelosi` to watch one personally (DM on a new trade)\n"
       << "`/admin` - admin panel: disk space, database location, admins (admins only)\n\n"
       << "In a direct message with me you can also just type the command, for example "
       << "`buy FCX 0.858291457 59.78$`, `sell FCX 0.858291457 67.87$`, `profit FCX` or `status`.\n\n"
@@ -77,10 +77,32 @@ CommandReply CommandService::lookup_failed(const std::string& intro, const std::
                                            const std::string& example_command) {
     std::string text = intro + ": " + error;
     if (error.find("not found") == std::string::npos && error.find("No data found") == std::string::npos) return fail(text);
+
+    // HEAL.G: ".G" is no exchange ending, and searching finds neither it nor the London HEAL.L,
+    // so also try the base ticker on the main exchanges.
+    const auto dot = symbol.rfind('.');
+    const std::string base = dot == std::string::npos ? symbol : symbol.substr(0, dot);
+    const std::string ending = dot == std::string::npos ? "" : symbol.substr(dot);
     std::vector<SymbolMatch> matches;
-    for (auto& m : monitor_.search_symbols(symbol)) {
-        if (m.symbol != symbol) matches.push_back(std::move(m));
-        if (matches.size() == 5) break;
+    auto add = [&](SymbolMatch m) {
+        if (m.symbol == symbol || matches.size() >= 5) return;
+        for (const auto& x : matches) if (x.symbol == m.symbol) return;
+        matches.push_back(std::move(m));
+    };
+    std::vector<SymbolMatch> searched = monitor_.search_symbols(symbol);
+    if (!ending.empty() || searched.empty()) {
+        for (auto& m : monitor_.probe_listings(base)) add(std::move(m));
+    }
+    for (auto& m : searched) add(std::move(m));
+
+    static const char* const kEndings[] = {".L",  ".DE", ".F",  ".AS", ".PA", ".MI", ".SW", ".MC", ".BR", ".LS", ".VI",
+                                           ".ST", ".CO", ".OL", ".HE", ".IR", ".WA", ".PR", ".BD", ".TO", ".V",  ".AX",
+                                           ".HK", ".T",  ".KS", ".SS", ".SZ", ".NS", ".BO", ".SA", ".MX", ".TA", ".SI"};
+    bool known_ending = ending.empty();
+    for (const char* e : kEndings) known_ending = known_ending || ending == e;
+    if (!known_ending) {
+        text += ". `" + ending + "` isn't an exchange ending Yahoo Finance uses (London is `.L`, Xetra `.DE`, Amsterdam "
+                "`.AS`, Budapest `.BD`)";
     }
     if (matches.empty()) return fail(text + ".");
     text += ". Did you mean one of these?\n";
@@ -626,8 +648,9 @@ CommandReply CommandService::monitor_politician(const std::string& user, const s
     const std::string name = trim(input);
     if (name.empty()) return fail("Usage: `monitor politician Nancy Pelosi`.");
     if (repo_.add_politician_watch(user, to_lower(name))) {
-        return {true, "Now watching **" + name + "**. You'll get a direct message when a new trade is disclosed. Every new "
-                      "Senate disclosure is also posted in the server's public channel, if an admin has set one up."};
+        return {true, "Now watching **" + name + "**. You'll get a direct message when a new trade is disclosed (every word "
+                      "you typed must be in the name, so a last name is enough). Every new disclosure is also posted in "
+                      "the server's public channel, if an admin has set one up."};
     }
     return {true, "You're already watching **" + name + "**."};
 }
@@ -645,22 +668,25 @@ CommandReply CommandService::politicians(const std::string& user, const std::str
     const auto trades = repo_.recent_politician_trades(filter, 10);
     if (trades.empty()) {
         if (!filter.empty()) return {true, "No disclosed trades found yet for **" + filter + "**."};
-        return {true, "No politician trades tracked yet. The Senate disclosure check runs once a day; try again soon, or "
+        return {true, "No politician trades tracked yet. The disclosure check runs once a day; try again soon, or "
                       "ask an admin to run `politicians run` in the server console."};
     }
     std::ostringstream m;
-    m << "**Recent politician stock trades" << (filter.empty() ? "" : " - " + filter) << "** (US Senate only)\n";
+    m << "**Recent politician stock trades" << (filter.empty() ? "" : " - " + filter) << "** (newest filings first)\n";
     for (const auto& t : trades) {
         const bool has_ticker = !t.ticker.empty() && t.ticker != "--";
         m << "- **" << t.full_name() << "**";
         if (!t.office.empty()) m << " (" << t.office << ")";
-        m << ": " << (t.transaction_type.empty() ? "trade" : t.transaction_type) << " " << (has_ticker ? t.ticker : t.asset_name)
-          << ", " << format_money(t.amount_min) << (t.amount_max ? "-" + format_money(*t.amount_max) : "+");
-        if (!t.transaction_date.empty()) m << ", " << t.transaction_date;
+        m << ": " << (t.transaction_type.empty() ? "trade" : t.transaction_type) << " **"
+          << (has_ticker ? t.ticker : short_company_name(t.asset_name, 40)) << "**, " << (t.owner.empty() ? "Self" : t.owner)
+          << ", " << format_whole_money(t.amount_min) << (t.amount_max ? " - " + format_whole_money(*t.amount_max) : "+");
+        if (!t.transaction_date.empty()) m << ", traded " << t.transaction_date;
+        if (!t.filed_date.empty()) m << ", filed " << t.filed_date;
         m << "\n";
     }
     m << "\nWatch one personally with `monitor politician <name>`. Disclosures can legally appear up to ~45 days after the "
-         "trade. Senate only for now: the House only publishes filings as PDFs, which isn't supported yet.";
+         "trade. House filings come from the House Clerk; the Senate's site refuses connections from many networks, "
+         "including outside the US. Scanned paper filings can't be read.";
     return {true, m.str()};
 }
 

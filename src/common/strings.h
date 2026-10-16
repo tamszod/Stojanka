@@ -21,6 +21,7 @@ std::string currency_symbol(const std::string& currency);
 std::string format_double(double v, int decimals);
 std::string format_money(double v, const std::string& currency = "USD");
 std::string format_signed_money(double v, const std::string& currency = "USD");
+std::string format_whole_money(double v, const std::string& currency = "USD");  // "$1,001", cents only when there are any
 std::string format_shares(double shares);
 std::string format_percent(double fraction, int decimals = 1);
 

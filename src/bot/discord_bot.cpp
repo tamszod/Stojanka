@@ -166,7 +166,7 @@ void DiscordBot::register_commands() {
     remove.add_option(politician_option());
     cmds.push_back(remove);
 
-    dpp::slashcommand politicians("politicians", "Recent US Senate stock trades; empty for everyone", app);
+    dpp::slashcommand politicians("politicians", "Recent US Congress (House and Senate) stock trades; empty for everyone", app);
     politicians.add_option(dpp::command_option(dpp::co_string, "name", "Only trades matching this name", false));
     cmds.push_back(politicians);
 

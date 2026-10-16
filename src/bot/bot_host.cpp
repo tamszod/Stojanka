@@ -124,7 +124,9 @@ bool BotHost::start(std::string* error) {
     arena_->set_pythia(pythia_.get());
     commands_->set_arena(arena_.get());
     senate_ = std::make_unique<politicians::SenateEfdClient>();
-    politicians_ = std::make_unique<politicians::PoliticianService>(*repo_, *senate_, config_);
+    house_ = std::make_unique<politicians::HouseClerkClient>();
+    politicians_ = std::make_unique<politicians::PoliticianService>(
+        *repo_, std::vector<politicians::DisclosureSource*>{house_.get(), senate_.get()}, config_);
     console_ = std::make_unique<ServerConsole>(*repo_, *monitor_, *screener_, *admin_, *commands_);
     console_->set_arena(arena_.get());
     console_->set_politicians(politicians_.get());
@@ -162,6 +164,7 @@ void BotHost::stop() {
     console_.reset();
     politicians_.reset();
     senate_.reset();
+    house_.reset();
     arena_.reset();
     pythia_.reset();
     admin_.reset();

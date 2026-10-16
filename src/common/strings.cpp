@@ -118,6 +118,12 @@ std::string format_money(double v, const std::string& currency) {
     return (neg ? "-" : "") + currency_symbol(currency) + body;
 }
 
+std::string format_whole_money(double v, const std::string& currency) {
+    std::string s = format_money(v, currency);
+    if (s.size() > 3 && s.compare(s.size() - 3, 3, ".00") == 0) s.resize(s.size() - 3);
+    return s;
+}
+
 std::string format_signed_money(double v, const std::string& currency) {
     if (v > 0.004) return "+" + format_money(v, currency);
     return format_money(v, currency);

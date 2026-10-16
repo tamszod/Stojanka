@@ -5,10 +5,20 @@ MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 
 ## [0.1.2] - Unreleased
 
+### Added
+- Politician trades from the **US House of Representatives**, read from the House Clerk's official site: a yearly list of filings and each trade report as a PDF, read by a small built-in PDF text reader (including the ~15% of reports that are RC4-"encrypted" with an empty password). The first live check read 74 filings with 664 trades from the last 60 days; only scanned paper filings are skipped. `/politicians` lists the newest filings first with owner, amount, trade and filing dates.
+
 ### Changed
+- PEAK and SUPPORT alerts name the company too: "**FCX** (Freeport-McMoRan) has reached PEAK. …".
+- A new politician filing is posted as one message listing its trades (up to ten, then "and N more"), instead of one message per trade; a single House report can list 57 trades.
+- The first check of each chamber stores what it finds without posting it, so starting the tracker doesn't flood the channel with two months of filings.
 - Watched-stock tables show the company name with the ticker, shortened for display ("NVIDIA" for NVIDIA Corporation, "JPMorgan Chase" for JPMorgan Chase & Co.): under the ticker in the server window's Watched stocks tab (full name on hover), and as a column in the console's `stocks` command and in `/status` in Discord. Long alerts in the server table wrap instead of being cut off.
 
 ### Fixed
+- The politician tracker found nothing (#4): the Senate's site refuses connections from outside the US (HTTP 403), whatever the request looks like. The House is now read instead, the Senate is still tried daily, and one blocked source no longer means no data.
+- `monitor politician:Pelosi` never sent a message: watches had to match the filer's full name exactly. Now every word typed must appear in the name, so a last name is enough.
+- `/monitor stock:OTP` and `stock:DHL` failed with "unexpected market data format": Yahoo answers those plain tickers (empty listings) with `null` fields. They are now read safely, and a listing without prices counts as not found, so the reply suggests the real ones (`OTP.BD` in Budapest, `DHL.DE` on Xetra).
+- `/monitor stock:HEAL.G` (a wrong exchange ending) gave no useful suggestion: Yahoo's search finds nothing for it, and searching `HEAL` only lists the US fund. A ticker that isn't found is now also tried on the main exchanges (London, Xetra, Amsterdam, Paris, Milan, Swiss, Budapest, US), so the reply lists `HEAL.L` (London) and the other real listings, and says when an ending like `.G` doesn't exist.
 - The console's `stocks` table and the arena tables were misaligned for euro and pound amounts (padding counted bytes).
 
 ## [0.1.1] - 2026-10-14
