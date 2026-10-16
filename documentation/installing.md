@@ -51,6 +51,7 @@ offers:
 | **Update** | Shown when the installer is newer. It installs the new version and keeps your token, database and settings. |
 | **Repair** | Shown when the versions are the same. It checks every program file and restores only the ones that are missing or damaged. Your data is untouched. |
 | **Change settings** | Reinstalls with a new token, database or check interval. |
+| **Revert update** | Shown for 3 days after an update. It goes back to the version the update replaced; your settings, watch lists and trades stay. |
 | **Uninstall** | Removes the program, its shortcuts and its app-list entry. Your database and settings are kept unless you tick **Also delete my data**. Data stored outside the install folder is never deleted. |
 
 The **On this computer** choices are shown on this page too, set to what you have now, so an
@@ -61,12 +62,28 @@ which can take up to a minute while the AI model is training. Tick **Start Stroj
 end to start it again. A copy running in a console window (`start_strojanka.bat`) can't be closed
 this way; close it yourself.
 
+### Going back after an update
+
+Every update keeps a copy of the version it replaces for **3 days**, in a `previous` folder inside
+the install folder. To go back, open the setup again, either the installer you downloaded or
+**Settings > Apps > Installed apps > Strojanka > ... > Modify**, and choose **Revert update**. The card
+says until when it is possible. Strojanka is closed first if it is running; start it again
+afterwards.
+
+- Your settings, watch lists and trades stay as they are.
+- If the update also upgraded the database, the older version can't read the upgraded file, so
+  the copy saved just before the update is put back. Anything recorded since the update is not
+  deleted: it stays in a file named `strojanka.db.after-update-<date>` next to the database, and
+  the setup tells you so.
+- After the 3 days the copy is deleted the next time Strojanka or the setup starts.
+
 ### Without the window (scripts and servers)
 
 ```
 StrojankaInstaller --yes --dir "D:\Strojanka" --token "YOUR_TOKEN"          # install
 StrojankaInstaller --yes --dir "D:\Strojanka"                                # update or repair, keeps settings
 StrojankaInstaller --yes --dir "D:\Strojanka" --autostart                    # ... and start with Windows (--no-autostart: don't)
+StrojankaInstaller --yes --dir "D:\Strojanka" --revert                       # go back to the version before the last update
 StrojankaInstaller --yes --dir "D:\Strojanka" --uninstall [--remove-data]    # uninstall
 StrojankaInstaller --console                                                 # text installer with questions
 ```

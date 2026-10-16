@@ -6,6 +6,7 @@ MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 ## [0.1.2] - Unreleased
 
 ### Added
+- **Revert update**: every update keeps the version it replaces for 3 days (`previous` folder in the install folder), and the setup offers *Revert update* during that time, also through Settings > Apps > Strojanka > Modify, or `--revert` in text mode. Settings, watch lists and trades stay; if the update upgraded the database, the copy saved just before it is put back and the newer one is kept beside it. The copy is deleted after the 3 days.
 - Politician trades from the **US House of Representatives**, read from the House Clerk's official site: a yearly list of filings and each trade report as a PDF, read by a small built-in PDF text reader (including the ~15% of reports that are RC4-"encrypted" with an empty password). The first live check read 74 filings with 664 trades from the last 60 days; only scanned paper filings are skipped. `/politicians` lists the newest filings first with owner, amount, trade and filing dates.
 
 ### Changed

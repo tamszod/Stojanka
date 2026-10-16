@@ -39,10 +39,14 @@ struct ExistingInstall {
     bool start_menu_shortcut = true;
     bool desktop_shortcut = false;
     bool autostart = true;
+    // The version the last update replaced, while it can still be restored ("" = nothing to revert).
+    std::string revert_version;
+    std::string revert_until;  // ISO UTC
 };
+// Also deletes an update backup whose days are over.
 ExistingInstall inspect_install(const std::string& dir);
 
-enum class Action { Install, Update, Repair, Uninstall };
+enum class Action { Install, Update, Repair, Uninstall, Revert };
 const char* action_name(Action a);
 
 struct Request {
@@ -64,6 +68,8 @@ struct Result {
     int files_written = 0;
     int files_unchanged = 0;
     std::string launcher;               // what "Start Strojanka now" opens (the server window)
+    std::string version;                // the version now installed
+    std::string note;                   // something the user should know, e.g. which database is in use after a revert
 };
 
 // fraction is 0..1; message is a short human-readable step description.

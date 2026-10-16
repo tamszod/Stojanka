@@ -41,6 +41,7 @@ set(STROJANKA_COMMON_SOURCES
   src/common/instance_lock.cpp
   src/common/crash_handler.cpp
   src/common/html.cpp
+  src/common/update_backup.cpp
 )
 
 # Turns a file into a byte-array header (used for the HTML interfaces of the installer and server).
@@ -184,6 +185,7 @@ endif()
 # --- packer (build tool) ------------------------------------------------------------------
 add_executable(strojanka_pack src/packer/main.cpp ${STROJANKA_COMMON_SOURCES})
 target_include_directories(strojanka_pack PRIVATE src)
+target_link_libraries(strojanka_pack PRIVATE nlohmann_json::nlohmann_json)  # header-only, for common/update_backup
 if(WIN32)
   target_link_libraries(strojanka_pack PRIVATE dbghelp)
 endif()

@@ -36,7 +36,8 @@ void print_usage() {
               << "  --keep-config           on update, keep the existing strojanka.conf\n"
               << "  --autostart             start Strojanka Server (minimized) when you sign in to Windows\n"
               << "  --no-autostart          don't; without either option the current choice is kept (new installs: on)\n"
-              << "  --uninstall             remove Strojanka (add --remove-data to delete the database too)\n";
+              << "  --uninstall             remove Strojanka (add --remove-data to delete the database too)\n"
+              << "  --revert                go back to the version the last update replaced (kept for 3 days)\n";
 }
 
 #if defined(_WIN32)
@@ -90,6 +91,7 @@ int main(int argc, char** argv) {
         else if (a == "--remove-data") opt.remove_data = true;
         else if (a == "--autostart") opt.autostart = 1;
         else if (a == "--no-autostart") opt.autostart = 0;
+        else if (a == "--revert") opt.revert = true;
         else ok = false;
         if (!ok) {
             attach_console();
@@ -100,7 +102,7 @@ int main(int argc, char** argv) {
 
     const std::string self = executable_path();
     if (!console && !opt.unattended) {
-        const int rc = run_gui(self, opt.dir, opt.uninstall ? "uninstall" : "");
+        const int rc = run_gui(self, opt.dir, opt.uninstall ? "uninstall" : opt.revert ? "revert" : "");
         if (rc >= 0) return rc;
     }
     attach_console();

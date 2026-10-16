@@ -9,6 +9,7 @@
 #include "common/crash_handler.h"
 #include "common/platform.h"
 #include "common/strings.h"
+#include "common/update_backup.h"
 #include "common/utf8_path.h"
 #include "core/log.h"
 #include "core/migrations.h"
@@ -133,6 +134,17 @@ bool BotHost::start(std::string* error) {
 
     log_info("Strojanka " + std::string(STROJANKA_VERSION) + " starting, database " + db_path);
     report_previous_run(*repo_);
+    {
+        const std::string install_dir = executable_dir();
+        const std::string removed = remove_expired_update_backup(install_dir, unix_now());
+        if (!removed.empty()) {
+            log_info("the copy of version " + removed + " kept after the last update was removed: its " +
+                     std::to_string(kRevertDays) + " days are over");
+        } else if (const auto backup = read_update_backup(install_dir)) {
+            log_info("version " + backup->version + " can still be restored until " + backup->expires_at +
+                     " (run the setup and choose Revert update)");
+        }
+    }
     started_at_ = utc_now_iso();
     repo_->set_meta(kRunStateKey, "running");
     repo_->set_meta(kRunStartedKey, started_at_);

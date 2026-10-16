@@ -35,6 +35,7 @@ Action parse_action(const std::string& s) {
     if (s == "update") return Action::Update;
     if (s == "repair") return Action::Repair;
     if (s == "uninstall") return Action::Uninstall;
+    if (s == "revert") return Action::Revert;
     return Action::Install;
 }
 
@@ -74,7 +75,9 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
                         {"suggested", x.suggested},
                         {"start_menu", x.start_menu_shortcut},
                         {"desktop", x.desktop_shortcut},
-                        {"autostart", x.autostart}}
+                        {"autostart", x.autostart},
+                        {"revert_version", x.revert_version},
+                        {"revert_until", x.revert_until}}
                 .dump();
         });
 
@@ -118,7 +121,9 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
                                 {"error", result.error},
                                 {"files_written", result.files_written},
                                 {"files_unchanged", result.files_unchanged},
-                                {"launcher", result.launcher}};
+                                {"launcher", result.launcher},
+                                {"version", result.version},
+                                {"note", result.note}};
                 const std::string js = "window.__finished(" + done.dump() + ")";
                 w.dispatch([&w, &busy, js] {
                     busy = false;

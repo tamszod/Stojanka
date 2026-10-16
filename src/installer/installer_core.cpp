@@ -2,10 +2,12 @@
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #include "common/payload.h"
 #include "common/strings.h"
+#include "common/update_backup.h"
 #include "common/utf8_path.h"
 #include "core/version.h"
 #include "installer/platform_install.h"
@@ -144,9 +146,146 @@ Result uninstall(const Request& req, const std::string& container, const Progres
         if (same_file(setup, utf8_path(container))) os::delete_after_exit(path_utf8(setup));
         else remove_file(setup);
     }
+    remove_update_backup(path_utf8(dir));
     prune_empty(dir);
     progress(1.0, "Strojanka was removed");
     r.ok = true;
+    return r;
+}
+
+// Saves the installed version's program files under previous/ before an update overwrites them.
+// Which files: the old setup copy's own list when it is there (it is the old installer), else
+// the files this update will write. Settings and data stay where they are; they aren't replaced.
+bool save_update_backup(const fs::path& dir, const std::string& old_version, const std::vector<payload::Entry>& new_entries,
+                        UpdateBackup& b, std::string* error) {
+    std::set<std::string> files;
+    std::vector<payload::Entry> old_entries;
+    if (kSetupCopy[0] != '\0' && payload::read_index(path_utf8(dir / kSetupCopy), old_entries, nullptr)) {
+        for (const auto& e : old_entries) files.insert(e.path);
+    } else {
+        for (const auto& e : new_entries) files.insert(e.path);
+    }
+    files.insert(kLauncher);
+    if (kSetupCopy[0] != '\0') files.insert(kSetupCopy);
+
+    remove_update_backup(path_utf8(dir));
+    const fs::path prev = dir / kUpdateBackupDir;
+    std::error_code ec;
+    b = UpdateBackup{};
+    b.version = old_version;
+    b.created_at = utc_now_iso();
+    b.expires_at = unix_to_iso(unix_now() + static_cast<int64_t>(kRevertDays) * 86400);
+    for (const auto& rel : files) {
+        const fs::path src = dir / utf8_path(rel);
+        if (!fs::is_regular_file(src, ec)) continue;
+        const fs::path dst = prev / utf8_path(rel);
+        fs::create_directories(dst.parent_path(), ec);
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            if (error) *error = "Could not keep a copy of " + rel + " for going back later (" + ec.message() + "). Nothing was changed.";
+            remove_update_backup(path_utf8(dir));
+            return false;
+        }
+        b.files.push_back(rel);
+    }
+    for (const auto& e : new_entries) {
+        if (!files.count(e.path) && !fs::exists(dir / utf8_path(e.path), ec)) b.added_files.push_back(e.path);
+    }
+    return write_update_backup(path_utf8(dir), b, error);
+}
+
+// "database backed up to <path>" in the output of `strojanka --migrate` (core/migrations.cpp).
+std::string migration_backup_path(const std::string& output) {
+    const std::string marker = "database backed up to ";
+    const size_t p = output.find(marker);
+    if (p == std::string::npos) return {};
+    const size_t start = p + marker.size();
+    const size_t end = output.find_first_of("\r\n", start);
+    return trim(output.substr(start, end == std::string::npos ? std::string::npos : end - start));
+}
+
+Result revert(const Request& req, const std::string& container, const ProgressFn& progress) {
+    Result r;
+    auto fail = [&r](const std::string& message) {
+        r.error = message;
+        return r;
+    };
+    const fs::path dir = fs::absolute(utf8_path(req.dir));
+    progress(0.02, "Checking that Strojanka is not running");
+    if (const std::string busy = stop_running_copy(dir, progress); !busy.empty()) return fail(busy);
+    const auto b = read_update_backup(path_utf8(dir));
+    if (!b) return fail("There is no earlier version to go back to: no update was made in the last " + std::to_string(kRevertDays) + " days.");
+    if (update_backup_expired(*b, unix_now())) {
+        remove_update_backup(path_utf8(dir));
+        return fail("Going back to version " + b->version + " was possible until " + b->expires_at.substr(0, 10) + ".");
+    }
+    const fs::path prev = dir / kUpdateBackupDir;
+    std::error_code ec;
+    for (const auto& rel : b->files) {
+        if (!fs::is_regular_file(prev / utf8_path(rel), ec)) {
+            return fail("The saved copy of version " + b->version + " is incomplete (" + rel + " is missing), so nothing was changed.");
+        }
+    }
+    if (!b->database_backup.empty() && !fs::is_regular_file(utf8_path(b->database_backup), ec)) {
+        return fail("Version " + b->version + " can't open the database the update upgraded, and the copy from before the update (" +
+                    b->database_backup + ") is gone, so nothing was changed.");
+    }
+
+    progress(0.2, "Restoring version " + b->version);
+    for (const auto& rel : b->files) {
+        const fs::path dest = dir / utf8_path(rel);
+        if (same_file(dest, utf8_path(container))) {
+            // The setup running this is the newer one; Windows allows renaming a running program.
+            fs::path moved = dest;
+            moved += ".newer";
+            fs::remove(moved, ec);
+            fs::rename(dest, moved, ec);
+            if (ec) return fail("Could not replace the running setup (" + ec.message() + ").");
+            os::delete_after_exit(path_utf8(moved));
+        }
+        fs::create_directories(dest.parent_path(), ec);
+        fs::copy_file(prev / utf8_path(rel), dest, fs::copy_options::overwrite_existing, ec);
+        if (ec) return fail("Could not restore " + rel + " (" + ec.message() + "). Run the setup again to finish.");
+    }
+    const std::set<std::string> kept(b->files.begin(), b->files.end());
+    for (const auto& rel : b->added_files) {
+        if (!kept.count(rel)) remove_file(dir / utf8_path(rel));
+    }
+
+    progress(0.7, "Restoring settings");
+    const fs::path config_path = dir / kConfigName;
+    if (auto c = load_config(path_utf8(config_path), nullptr)) {
+        c->installed_version = b->version;  // the token, database and other choices stay as they are now
+        save_config(*c, path_utf8(config_path), nullptr);
+    }
+    if (!b->database_backup.empty()) {
+        progress(0.8, "Switching back to the database from before the update");
+        std::string stamp = utc_now_iso();
+        for (char& c : stamp) {
+            if (c == ':') c = '-';
+        }
+        const fs::path db = utf8_path(b->database_path);
+        const fs::path moved = utf8_path(b->database_path + ".after-update-" + stamp);
+        fs::rename(db, moved, ec);
+        for (const char* side : {"-wal", "-shm"}) {
+            fs::path from = db, to = moved;
+            from += side;
+            to += side;
+            if (fs::exists(from, ec)) fs::rename(from, to, ec);
+        }
+        fs::copy_file(utf8_path(b->database_backup), db, fs::copy_options::overwrite_existing, ec);
+        if (ec) return fail("Could not put back the database from before the update (" + ec.message() + "). It is still at " + b->database_backup + ".");
+        r.note = "Version " + b->version + " can't read the database the update upgraded, so the copy from before the update (" +
+                 b->created_at.substr(0, 10) + ") is in use again. Everything recorded since then is kept in " + path_utf8(moved) + ".";
+    }
+
+    progress(0.9, "Finishing");
+    os::register_app(path_utf8(dir), b->version, folder_size_kb(dir));
+    remove_update_backup(path_utf8(dir));
+    progress(1.0, "Version " + b->version + " is back");
+    r.ok = true;
+    r.version = b->version;
+    r.launcher = path_utf8(dir / kServerApp);
     return r;
 }
 
@@ -177,6 +316,7 @@ const char* action_name(Action a) {
         case Action::Update: return "update";
         case Action::Repair: return "repair";
         case Action::Uninstall: return "uninstall";
+        case Action::Revert: return "revert";
     }
     return "install";
 }
@@ -209,11 +349,17 @@ ExistingInstall inspect_install(const std::string& dir_text) {
     }
     const int cmp = x.version.empty() ? 1 : compare_versions(STROJANKA_VERSION, x.version);
     x.suggested = cmp > 0 ? "update" : cmp == 0 ? "repair" : "downgrade";
+    remove_expired_update_backup(path_utf8(dir), unix_now());
+    if (const auto b = read_update_backup(path_utf8(dir)); b && b->version != x.version) {
+        x.revert_version = b->version;
+        x.revert_until = b->expires_at;
+    }
     return x;
 }
 
 Result execute(const Request& req, const std::string& container, const ProgressFn& progress) {
     if (req.action == Action::Uninstall) return uninstall(req, container, progress);
+    if (req.action == Action::Revert) return revert(req, container, progress);
     Result r;
     auto fail = [&r](const std::string& message) {
         r.error = message;
@@ -249,6 +395,16 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     std::vector<payload::Entry> entries;
     std::string error;
     if (!payload::read_index(container, entries, &error)) return fail("This installer is damaged: " + error);
+
+    // Another version is being replaced: keep it for a few days so the update can be reverted.
+    const ExistingInstall existing = inspect_install(path_utf8(dir));
+    UpdateBackup backup;
+    const bool keeping_backup = existing.found && !existing.version.empty() && existing.version != STROJANKA_VERSION &&
+                                req.action != Action::Repair;
+    if (keeping_backup) {
+        progress(0.04, "Keeping a copy of version " + existing.version + " for " + std::to_string(kRevertDays) + " days");
+        if (!save_update_backup(dir, existing.version, entries, backup, &error)) return fail(error);
+    }
     uint64_t total = 0, done = 0;
     for (const auto& e : entries) total += e.size;
     for (const auto& e : entries) {
@@ -275,6 +431,12 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     std::string output;
     const int rc = os::run_capture(path_utf8(bot), {"--migrate", "--config", path_utf8(config_path)}, output);
     if (rc != 0) return fail("Database setup failed (exit code " + std::to_string(rc) + "):\n" + trim(output));
+    if (keeping_backup) {
+        // The older version can't open an upgraded database; a revert puts this copy back.
+        backup.database_path = resolve_config_path(path_utf8(config_path), config.database_path);
+        backup.database_backup = migration_backup_path(output);
+        write_update_backup(path_utf8(dir), backup, nullptr);
+    }
 
     progress(0.92, "Creating shortcuts");
     if (kSetupCopy[0] != '\0') {
@@ -288,7 +450,12 @@ Result execute(const Request& req, const std::string& container, const ProgressF
 
     progress(1.0, "Finished");
     r.ok = true;
+    r.version = STROJANKA_VERSION;
     r.launcher = path_utf8(dir / kServerApp);
+    if (keeping_backup) {
+        r.note = "Version " + existing.version + " is kept until " + backup.expires_at.substr(0, 10) +
+                 ": run this setup again (or Settings > Apps > Strojanka > Modify) and choose Revert update to go back.";
+    }
     return r;
 }
 

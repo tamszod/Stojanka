@@ -17,6 +17,7 @@
 #include "common/config.h"
 #include "common/payload.h"
 #include "common/strings.h"
+#include "common/update_backup.h"
 #include "common/utf8_path.h"
 #include "core/analysis/analyzer.h"
 #include "core/analysis/calibrator.h"
@@ -1344,6 +1345,33 @@ void test_company_names() {
     CHECK(starts_with(support_alert("FCX", "", 50, "USD", 49, 0.7, learning), "**FCX** has reached SUPPORT level."));
 }
 
+void test_update_backup(const fs::path& dir) {
+    const std::string install = path_utf8(dir / "install_for_revert");
+    CHECK(!read_update_backup(install).has_value());
+    UpdateBackup b;
+    b.version = "0.1.1";
+    b.created_at = "2026-10-16T12:00:00Z";
+    b.expires_at = "2026-10-19T12:00:00Z";
+    b.files = {"strojanka.exe", "docs/README.md"};
+    b.added_files = {"new.dll"};
+    b.database_path = "D:/strojanka.db";
+    std::string err;
+    CHECK(write_update_backup(install, b, &err));
+    const auto got = read_update_backup(install);
+    CHECK(got.has_value());
+    if (got) {
+        CHECK(got->version == "0.1.1" && got->files.size() == 2 && got->added_files == std::vector<std::string>{"new.dll"});
+        CHECK(got->database_backup.empty() && got->database_path == "D:/strojanka.db");
+    }
+    CHECK(!update_backup_expired(b, iso_to_unix("2026-10-19T11:59:59Z")));
+    CHECK(update_backup_expired(b, iso_to_unix("2026-10-19T12:00:00Z")));
+    CHECK(remove_expired_update_backup(install, iso_to_unix("2026-10-18T00:00:00Z")).empty());  // still in its 3 days
+    CHECK(read_update_backup(install).has_value());
+    CHECK(remove_expired_update_backup(install, iso_to_unix("2026-10-20T00:00:00Z")) == "0.1.1");
+    CHECK(!read_update_backup(install).has_value());
+    CHECK(!fs::exists(utf8_path(install) / kUpdateBackupDir));
+}
+
 void test_previous_run() {
     const int64_t started = iso_to_unix("2026-10-15T07:07:21Z");
     // Clean stop, or a first start ever: nothing to say.
@@ -1639,6 +1667,7 @@ int main() {
         {"ETFs: pence, search, European amounts, currencies", [&] { test_etfs(dir); }},
         {"portfolio and trading history", [&] { test_portfolio_and_history(dir); }},
         {"short company names", test_company_names},
+        {"update backup: write, read, expire", [&] { test_update_backup(dir); }},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

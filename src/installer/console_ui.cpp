@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "common/strings.h"
+#include "common/update_backup.h"
 #include "common/utf8_path.h"
 #include "core/version.h"
 #include "installer/installer_core.h"
@@ -96,7 +97,16 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
     req.dir = path_utf8(fs::absolute(utf8_path(req.dir)));
     const ExistingInstall existing = inspect_install(req.dir);
 
-    if (opt.uninstall) {
+    if (opt.revert) {
+        if (existing.revert_version.empty()) {
+            std::cerr << "There is no earlier version to go back to in " << req.dir << " (an update keeps one for " << kRevertDays
+                      << " days).\n";
+            return finish(1, opt.unattended);
+        }
+        if (!opt.unattended && !ask_yes_no("Go back to version " + existing.revert_version + "?", true)) return 1;
+        req.action = Action::Revert;
+        req.keep_settings = true;
+    } else if (opt.uninstall) {
         if (!existing.found) {
             std::cerr << "No Strojanka installation in " << req.dir << "\n";
             return finish(1, opt.unattended);
@@ -114,10 +124,14 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
             std::cout << "  1) " << (existing.suggested == "repair" ? "Repair" : "Update") << " and keep the settings\n"
                       << "  2) Reinstall with new settings\n"
                       << "  3) Uninstall\n";
-            const std::string choice = ask("Choose 1, 2 or 3", "1");
-            if (choice == "3") {
+            if (!existing.revert_version.empty()) {
+                std::cout << "  4) Revert the last update: go back to version " << existing.revert_version << " (possible until "
+                          << existing.revert_until.substr(0, 16) << " UTC)\n";
+            }
+            const std::string choice = ask(existing.revert_version.empty() ? "Choose 1, 2 or 3" : "Choose 1, 2, 3 or 4", "1");
+            if (choice == "3" || (choice == "4" && !existing.revert_version.empty())) {
                 ConsoleOptions u = opt;
-                u.uninstall = true;
+                (choice == "3" ? u.uninstall : u.revert) = true;
                 return run_console(container, u);
             }
             keep = choice != "2";
@@ -171,7 +185,7 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
     }
 #endif
 
-    if (!opt.unattended && !opt.uninstall && !ask_yes_no(std::string("\nStart: ") + action_name(req.action) + " in " + req.dir + "?", true)) {
+    if (!opt.unattended && !opt.uninstall && !opt.revert && !ask_yes_no(std::string("\nStart: ") + action_name(req.action) + " in " + req.dir + "?", true)) {
         std::cout << "Cancelled.\n";
         return 1;
     }
@@ -186,12 +200,15 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
     }
     if (req.action == Action::Uninstall) {
         std::cout << "\nStrojanka was removed.\n";
+    } else if (req.action == Action::Revert) {
+        std::cout << "\nStrojanka is back on version " << r.version << ".\n";
     } else {
         std::cout << "\nStrojanka " << STROJANKA_VERSION << " is ready (" << r.files_written << " file(s) written, "
                   << r.files_unchanged << " already up to date).\n"
                   << "Start it with: " << r.launcher << " (or " << kLauncher << " without a window)\n"
                   << "Then open a direct message with your bot in Discord and type: help\n";
     }
+    if (!r.note.empty()) std::cout << r.note << "\n";
     return finish(0, opt.unattended);
 }
 

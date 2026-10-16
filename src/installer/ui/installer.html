@@ -65,6 +65,9 @@
   button.danger { color: var(--danger); }
   button:disabled { opacity: .5; cursor: default; filter: none; }
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  .cards.three { grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .cards.three .card { padding: 10px 12px; }
+  .cards.three .card span { font-size: 12px; line-height: 1.4; }
   .card {
     background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; cursor: pointer;
     box-shadow: var(--shadow); transition: border-color .15s, transform .1s;
@@ -129,6 +132,7 @@
       <div class="card" data-act="update"><span class="tag" id="tag-update"></span><b>Update</b><span>Install the new version and keep your token, database and settings.</span></div>
       <div class="card" data-act="repair"><span class="tag" id="tag-repair"></span><b>Repair</b><span>Restore missing or damaged program files. Your data is kept.</span></div>
       <div class="card" data-act="change"><b>Change settings</b><span>Reinstall with a new bot token, database or check interval.</span></div>
+      <div class="card" data-act="revert" hidden><b>Revert update</b><span id="revert-text"></span></div>
       <div class="card" data-act="uninstall"><b>Uninstall</b><span>Remove Strojanka from this computer.</span></div>
     </div>
     <div class="group">
@@ -235,6 +239,7 @@ function nextLabel() {
   if (state.page === 'welcome') {
     if (state.action === 'update') return 'Update';
     if (state.action === 'repair') return 'Repair';
+    if (state.action === 'revert') return 'Revert';
     return 'Next';
   }
   if (state.page === 'settings') return state.action === 'change' ? 'Reinstall' : 'Install';
@@ -246,7 +251,7 @@ function nextLabel() {
 function selectAction(act) {
   state.action = act;
   document.querySelectorAll('#w-existing .card').forEach(c => c.classList.toggle('sel', c.dataset.act === act));
-  $('integration').hidden = state.info.platform !== 'windows' || act === 'uninstall';
+  $('integration').hidden = state.info.platform !== 'windows' || act === 'uninstall' || act === 'revert';
   $('b-next').textContent = nextLabel();
 }
 
@@ -281,6 +286,13 @@ async function inspect() {
   else $('w-lead').textContent = `Version ${have} in this folder is newer than this setup (${v}). Installing would downgrade it.`;
   document.querySelector('[data-act=update] b').textContent = x.suggested === 'downgrade' ? 'Downgrade' : 'Update';
   document.querySelector('[data-act=update]').hidden = x.suggested === 'repair';
+  const revert = document.querySelector('[data-act=revert]');
+  revert.hidden = !x.revert_version;
+  if (x.revert_version) {
+    const until = new Date(x.revert_until);
+    $('revert-text').textContent = `Back to version ${x.revert_version}, possible until ${until.toLocaleDateString()} ${until.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}.`;
+  }
+  $('w-existing').classList.toggle('three', [...document.querySelectorAll('#w-existing .card')].filter(c => !c.hidden).length > 4);
   $('dir-hint').textContent = x.has_config ? 'Your settings and database were found and will be kept.' : 'No settings file was found here. Use "Change settings" to create one.';
   selectAction(x.has_config ? (x.suggested === 'repair' ? 'repair' : 'update') : 'change');
 }
@@ -337,11 +349,11 @@ window.__finished = r => {
   if (!r.ok) { $('d-title').textContent = 'Something went wrong'; $('d-lead').textContent = 'Nothing you set up before was deleted. Fix the problem below and run the setup again.'; }
   else if (un) { $('d-title').textContent = 'Strojanka was removed'; $('d-lead').textContent = $('rm-data').checked ? 'The program and your data were deleted.' : 'Your database and settings were kept, so a reinstall picks up where you left off.'; }
   else {
-    const verb = { update: 'updated', repair: 'repaired', change: 'reinstalled', install: 'installed' }[state.action];
+    const verb = { update: 'updated', repair: 'repaired', change: 'reinstalled', install: 'installed', revert: 'back on version ' + r.version }[state.action];
     $('d-title').textContent = 'Strojanka is ' + verb;
-    let lead = `Version ${state.info.version} is ready.`;
+    let lead = `Version ${r.version || state.info.version} is ready.`;
     if (state.action === 'repair') lead += r.files_written ? ` ${r.files_written} damaged or missing file(s) were restored.` : ' All program files were already intact.';
-    $('d-lead').textContent = lead + ' Open a direct message with your bot in Discord and type help.';
+    $('d-lead').textContent = lead + (r.note ? ' ' + r.note : '') + ' Open a direct message with your bot in Discord and type help.';
   }
   show('done');
 };
@@ -351,7 +363,7 @@ async function run() {
   const req = {
     action: act === 'change' ? 'install' : act,
     dir: $('dir').value.trim(),
-    keep_settings: act === 'update' || act === 'repair',
+    keep_settings: act === 'update' || act === 'repair' || act === 'revert',
     token: $('token').value.trim(),
     database_path: $('db-path').value.trim(),
     poll_minutes: parseInt($('poll').value, 10),
@@ -360,7 +372,7 @@ async function run() {
     autostart: $('autostart').checked,
     remove_data: $('rm-data').checked,
   };
-  $('p-title').textContent = { update: 'Updating…', repair: 'Repairing…', uninstall: 'Uninstalling…' }[act] || 'Installing…';
+  $('p-title').textContent = { update: 'Updating…', repair: 'Repairing…', uninstall: 'Uninstalling…', revert: 'Going back…' }[act] || 'Installing…';
   $('p-log').textContent = ''; $('p-bar').style.width = '0';
   state.busy = true; show('progress');
   await window.startTask(req);
@@ -369,7 +381,7 @@ async function run() {
 $('b-next').onclick = async () => {
   if (state.page === 'welcome') {
     if (!$('dir').value.trim()) { $('dir-hint').textContent = 'Choose a folder first.'; return; }
-    if (state.action === 'update' || state.action === 'repair') return run();
+    if (state.action === 'update' || state.action === 'repair' || state.action === 'revert') return run();
     if (state.action === 'uninstall') return show('uninstall');
     prepareSettings(); return show('settings');
   }
@@ -408,7 +420,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Enter' && !$('b-next'
   $('dir').value = state.info.dir;
   await inspect();
   if (state.info.start === 'uninstall' && state.existing.found) { selectAction('uninstall'); show('uninstall'); }
-  else show('welcome');
+  else {
+    if (state.info.start === 'revert' && state.existing.revert_version) selectAction('revert');
+    show('welcome');
+  }
 })();
 </script>
 </body>
