@@ -112,6 +112,35 @@ uint64_t Database::file_size() const {
     return total;
 }
 
+void Database::backup_to(const std::string& path) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const auto target = utf8_path(path);
+    std::error_code ec;
+    if (std::filesystem::exists(target, ec)) throw DatabaseError("a file already exists at " + path);
+    if (target.has_parent_path()) std::filesystem::create_directories(target.parent_path(), ec);
+    if (ec) throw DatabaseError("cannot create folder " + path_utf8(target.parent_path()) + ": " + ec.message());
+    {
+        auto st = prepare("VACUUM INTO ?1;");  // a consistent snapshot even while the bot keeps writing
+        st.bind(1, path);
+        st.step();
+    }
+    // Checked read-only, so opening it leaves no journal or WAL files beside the backup.
+    sqlite3* copy = nullptr;
+    std::string result;
+    if (sqlite3_open_v2(path.c_str(), &copy, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+        sqlite3_stmt* check = nullptr;
+        if (sqlite3_prepare_v2(copy, "PRAGMA integrity_check;", -1, &check, nullptr) == SQLITE_OK && sqlite3_step(check) == SQLITE_ROW) {
+            result = reinterpret_cast<const char*>(sqlite3_column_text(check, 0));
+        }
+        sqlite3_finalize(check);
+    }
+    if (copy) sqlite3_close(copy);
+    if (result != "ok") {
+        remove_db_files(path);
+        throw DatabaseError("the backup failed its integrity check (" + (result.empty() ? std::string("unreadable") : result) + ")");
+    }
+}
+
 void Database::move_to(const std::string& new_path) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (path_ == ":memory:") throw DatabaseError("an in-memory database cannot be moved");

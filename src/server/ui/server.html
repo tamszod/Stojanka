@@ -114,6 +114,7 @@
   <button id="b-settings" title="Open strojanka.conf">Settings</button>
   <button id="b-folder" title="Open the install folder">Folder</button>
   <button id="b-logfile" title="Open strojanka.log">Log file</button>
+  <button id="b-backup" title="Save the database as a .strojanka_backup file now">Backup</button>
   <button id="b-toggle" class="primary">Stop</button>
 </header>
 
@@ -132,12 +133,17 @@
 
 <main>
   <section>
-    <h2><span class="chips tabs"><button data-tab="stocks" class="on">Watched stocks</button><button data-tab="arena">Arena</button></span>
+    <h2><span class="chips tabs"><button data-tab="stocks" class="on">Watched stocks</button><button data-tab="arena">Arena</button><button data-tab="markets">Markets</button></span>
       <span class="spacer"></span><span class="busy" id="stocks-count"></span></h2>
     <div class="scroll" id="tab-stocks">
       <table><thead><tr><th>Stock</th><th>Price</th><th>Trend</th><th>Watchers</th><th>Last alert</th></tr></thead>
         <tbody id="stocks"></tbody></table>
       <div class="empty" id="stocks-empty">No stocks are being watched yet. Users add them with <b>monitor FCX</b> in Discord.</div>
+    </div>
+    <div class="scroll" id="tab-markets" hidden>
+      <table><thead><tr><th>Market</th><th>Ending</th><th>Hours</th><th>Now</th></tr></thead>
+        <tbody id="markets"></tbody></table>
+      <div class="note" id="markets-note"></div>
     </div>
     <div class="scroll" id="tab-arena" hidden>
       <table><thead><tr><th>Bot</th><th>Stage</th><th>Value</th><th>Return</th><th>vs Atlas</th><th>Trades</th><th>History test</th></tr></thead>
@@ -215,7 +221,10 @@ async function refreshState() {
   $('c-watched-sub').textContent = `${s.watch_entries} watch-list entries`;
   $('c-alerts').textContent = s.alerts; $('c-news').textContent = s.headlines;
   $('c-news-sub').textContent = 'news weight ' + Number(s.news_weight).toFixed(3);
-  $('c-db').textContent = bytes(s.db_size); $('c-db-path').textContent = s.db_path; $('c-db-path').title = s.db_path;
+  $('c-db').textContent = bytes(s.db_size);
+  const backupAge = s.last_backup_at ? (Date.now() - new Date(s.last_backup_at)) / 86400000 : Infinity;
+  $('c-db-path').textContent = s.last_backup_at ? `backed up ${ago(s.last_backup_at)}` + (backupAge >= 21 ? ' ⚠' : '') : 'never backed up ⚠';
+  $('c-db-path').title = s.db_path + (s.last_backup_path ? '\nLast backup: ' + s.last_backup_path : '');
   if (s.disk_capacity) {
     $('c-disk').textContent = bytes(s.disk_free);
     const used = 1 - s.disk_free / s.disk_capacity;
@@ -234,6 +243,15 @@ async function refreshStocks() {
   $('stocks').innerHTML = rows.map(r => `<tr><td class="sym" title="${esc(r.name)}">${esc(r.symbol)}<span class="company">${esc(r.short_name || r.name || '')}</span></td>
     <td>${r.price ? esc(r.price_text) : '–'}</td><td class="t-${esc(r.trend)}">${esc(r.trend || '–')}</td>
     <td>${r.watchers}</td><td class="alert">${esc(r.last_signal || '–')}</td></tr>`).join('');
+}
+
+async function refreshMarkets() {
+  let m = { rows: [], zone: '' };
+  try { m = await window.serverMarkets(); } catch (e) { return; }
+  $('markets').innerHTML = m.rows.map(r => `<tr title="for example ${esc(r.example)}"><td class="sym">${esc(r.name)}${r.watched ? '<span class="company">watched stocks here</span>' : ''}</td>
+    <td>${esc(r.suffix || '–')}</td><td>${esc(r.hours)}</td><td class="${r.open ? 'pos' : ''}">${esc(r.status)}</td></tr>`).join('');
+  $('markets-note').textContent = `Times are this computer's (${m.zone}). Ending = what goes after the ticker when adding a stock (US tickers have none). ` +
+    '* = lunch break. Public holidays aren\'t included. Prices of a closed market aren\'t checked.';
 }
 
 function pct(v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%'; }
@@ -257,8 +275,10 @@ document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === b));
   $('tab-stocks').hidden = b.dataset.tab !== 'stocks';
   $('tab-arena').hidden = b.dataset.tab !== 'arena';
+  $('tab-markets').hidden = b.dataset.tab !== 'markets';
   $('stocks-count').hidden = b.dataset.tab !== 'stocks';
   if (b.dataset.tab === 'arena') refreshArena();
+  if (b.dataset.tab === 'markets') refreshMarkets();
 });
 
 async function run(line) {
@@ -277,7 +297,8 @@ async function run(line) {
   refreshState(); refreshStocks();
 }
 
-const COMMANDS = ['help', 'status', 'stocks', 'users', 'check', 'screen', 'report ', 'news ', 'suggest', 'arena', 'arena run',
+const COMMANDS = ['help', 'status', 'stocks', 'users', 'check', 'screen', 'report ', 'news ', 'suggest', 'arena', 'arena run', 'backup', 'market ',
+                  'admin backup', 'admin email ',
                   'arena channel ', 'admin channel ', 'as ', 'admin add ',
                   'admin remove ', 'admin movedb ', 'loglevel ', 'version', 'clear'];
 $('cmd').addEventListener('keydown', e => {
@@ -306,9 +327,10 @@ $('b-retry').onclick = () => window.startBot().then(() => setTimeout(refreshStat
 $('b-settings').onclick = $('b-settings2').onclick = () => window.openPath('config');
 $('b-folder').onclick = () => window.openPath('folder');
 $('b-logfile').onclick = () => window.openPath('log');
+$('b-backup').onclick = () => run('backup');
 document.addEventListener('keydown', e => {
-  if (e.ctrlKey && (e.key === '1' || e.key === '2')) {
-    document.querySelector(`[data-tab="${e.key === '1' ? 'stocks' : 'arena'}"]`).click();
+  if (e.ctrlKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
+    document.querySelector(`[data-tab="${{1: 'stocks', 2: 'arena', 3: 'markets'}[e.key]}"]`).click();
     e.preventDefault();
     return;
   }
@@ -326,6 +348,7 @@ document.addEventListener('keydown', e => {
   setInterval(refreshState, 2000);
   setInterval(refreshStocks, 10000);
   setInterval(() => { if (!$('tab-arena').hidden) refreshArena(); }, 15000);
+  setInterval(() => { if (!$('tab-markets').hidden) refreshMarkets(); }, 30000);
   $('cmd').focus();
 })();
 </script>

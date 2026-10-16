@@ -26,7 +26,10 @@ and guides you through four steps:
      **Task Manager > Startup apps**, where you can also switch it off.
 2. **Settings:**
    - Paste the bot token from step 1. The window warns you if what you pasted doesn't look like a token, for example the Public Key.
-   - Choose a new database, or an existing `strojanka.db`, for example one from another computer.
+   - Choose a new database, an existing `strojanka.db` (for example from another computer), or
+     **Restore a backup** to start from a `.strojanka_backup` file.
+   - Optionally an email address (and its app password) for backup reminders; see
+     [backups](server.md#backups).
    - Pick how often prices are checked.
 3. **Install:** a progress bar shows each step.
 4. **Finish:** tick **Start Strojanka now** to launch the bot straight away.
@@ -52,7 +55,7 @@ offers:
 | **Repair** | Shown when the versions are the same. It checks every program file and restores only the ones that are missing or damaged. Your data is untouched. |
 | **Change settings** | Reinstalls with a new token, database or check interval. |
 | **Revert update** | Shown for 3 days after an update. It goes back to the version the update replaced; your settings, watch lists and trades stay. |
-| **Uninstall** | Removes the program, its shortcuts and its app-list entry. Your database and settings are kept unless you tick **Also delete my data**. Data stored outside the install folder is never deleted. |
+| **Uninstall** | Removes the program, its shortcuts and its app-list entry. Your database and settings are kept unless you tick **Also delete my data**. Data stored outside the install folder is never deleted, and neither are your backups (the `backups` folder). |
 
 The **On this computer** choices are shown on this page too, set to what you have now, so an
 update keeps your shortcuts and **Start with Windows** unless you change them there.
@@ -81,6 +84,7 @@ afterwards.
 
 ```
 StrojankaInstaller --yes --dir "D:\Strojanka" --token "YOUR_TOKEN"          # install
+StrojankaInstaller --yes --dir "D:\Strojanka" --token "YOUR_TOKEN" --restore "E:\strojanka-2026-10-16.strojanka_backup"   # install from a backup
 StrojankaInstaller --yes --dir "D:\Strojanka"                                # update or repair, keeps settings
 StrojankaInstaller --yes --dir "D:\Strojanka" --autostart                    # ... and start with Windows (--no-autostart: don't)
 StrojankaInstaller --yes --dir "D:\Strojanka" --revert                       # go back to the version before the last update

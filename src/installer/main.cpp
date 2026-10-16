@@ -32,6 +32,9 @@ void print_usage() {
               << "  --token <token>         Discord bot token\n"
               << "  --new-db <file>         create a new database at this path\n"
               << "  --existing-db <file>    use (and upgrade) an existing database\n"
+              << "  --restore <file>        start from a .strojanka_backup (copied to data\\strojanka.db)\n"
+              << "  --email <address>       send backup reminders to this address\n"
+              << "  --email-password <pw>   its app password\n"
               << "  --poll <minutes>        how often stocks are checked (default 15)\n"
               << "  --keep-config           on update, keep the existing strojanka.conf\n"
               << "  --autostart             start Strojanka Server (minimized) when you sign in to Windows\n"
@@ -92,6 +95,9 @@ int main(int argc, char** argv) {
         else if (a == "--autostart") opt.autostart = 1;
         else if (a == "--no-autostart") opt.autostart = 0;
         else if (a == "--revert") opt.revert = true;
+        else if (a == "--restore") ok = next(opt.restore);
+        else if (a == "--email") ok = next(opt.email);
+        else if (a == "--email-password") ok = next(opt.email_password);
         else ok = false;
         if (!ok) {
             attach_console();

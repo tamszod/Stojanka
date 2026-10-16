@@ -55,6 +55,9 @@ struct Request {
     bool keep_settings = false;         // Update/Repair: reuse strojanka.conf (token, database, interval)
     std::string token;                  // used when !keep_settings
     std::string database_path;          // new or existing database file (when !keep_settings)
+    std::string restore_backup;         // a .strojanka_backup to put at database_path first ("" = none)
+    std::string backup_email;           // when !keep_settings: where backup reminders go ("" = Discord only)
+    std::string smtp_password;          // that mailbox's (app) password
     int poll_minutes = 15;
     bool start_menu_shortcut = true;    // Windows
     bool desktop_shortcut = false;      // Windows

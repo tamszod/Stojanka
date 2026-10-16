@@ -43,6 +43,8 @@ public:
     CommandReply buy(const std::string& user, const std::string& symbol, const std::string& shares, const std::string& paid);
     CommandReply sell(const std::string& user, const std::string& symbol, const std::string& shares, const std::string& received);
     CommandReply report(const std::string& user, const std::string& symbol);
+    // Stock exchanges: ticker ending, hours (this computer's time) and whether they're open. filter: "" = all.
+    CommandReply market(const std::string& user, const std::string& filter);
     // Recent headlines for a stock with their tone and how news affects its signals.
     CommandReply news(const std::string& user, const std::string& symbol);
     // Stocks whose calls proved reliable in the honest test. side: "" (any), "buy" or "sell".

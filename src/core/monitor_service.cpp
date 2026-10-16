@@ -11,6 +11,7 @@
 #include "core/log.h"
 #include "core/messages.h"
 #include "core/portfolio.h"
+#include "core/markets.h"
 #include "core/thread_pool.h"
 
 namespace strojanka {
@@ -20,6 +21,7 @@ namespace {
 constexpr int kAnalysisBars = 520;                 // about two years of trading days
 constexpr int kBacktestBars = 2600;                // about ten years, for the walk-forward accuracy test
 constexpr int64_t kFullRefreshSeconds = 20 * 3600;  // re-download full history (adjusted prices) daily
+constexpr int64_t kAfterCloseSeconds = 10 * 60;     // one check this long after the close gets the final prices
 constexpr int64_t kRecalibrateSeconds = 20 * 3600;
 constexpr int64_t kStaleBarSeconds = 5 * 86400;     // no alerts on data older than this
 constexpr int64_t kSignalCooldownSeconds = 3 * 86400;
@@ -70,9 +72,26 @@ void MonitorService::stop() {
     if (thread_.joinable()) thread_.join();
 }
 
-void MonitorService::run_cycle() {
-    const auto symbols = repo_.watched_symbols();
-    if (symbols.empty()) return;
+void MonitorService::run_cycle(bool force) {
+    // A closed market has nothing new once its closing prices are in: skip those stocks until it opens.
+    const int64_t now = unix_now();
+    std::vector<std::string> symbols;
+    size_t closed = 0;
+    for (const auto& symbol : repo_.watched_symbols()) {
+        const Market* market = market_for_symbol(symbol);
+        if (!force && market && !market_open(*market, now)) {
+            const auto stock = repo_.get_stock(symbol);
+            if (stock && !stock->last_price_at.empty() && iso_to_unix(stock->last_price_at) >= last_close(*market, now) + kAfterCloseSeconds) {
+                ++closed;
+                continue;
+            }
+        }
+        symbols.push_back(symbol);
+    }
+    if (symbols.empty()) {
+        if (closed) log_debug("cycle skipped: the markets of all " + std::to_string(closed) + " watched stocks are closed");
+        return;
+    }
     const auto started = std::chrono::steady_clock::now();
     ThreadPool pool(std::min<size_t>(static_cast<size_t>(config_.max_parallel_fetches), symbols.size()));
     std::vector<std::future<std::string>> jobs;  // empty string = success, otherwise the error
@@ -106,7 +125,7 @@ void MonitorService::run_cycle() {
     }
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
     log_info("cycle done: " + std::to_string(ok) + "/" + std::to_string(symbols.size()) + " symbols refreshed in " +
-             std::to_string(ms.count()) + " ms");
+             std::to_string(ms.count()) + " ms" + (closed ? ", " + std::to_string(closed) + " skipped (market closed)" : ""));
     learn_news_weight();
 }
 

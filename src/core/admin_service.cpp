@@ -8,7 +8,9 @@
 #include "common/strings.h"
 #include "core/arena/arena_service.h"
 #include "common/utf8_path.h"
+#include "core/email.h"
 #include "core/log.h"
+#include "core/markets.h"
 #include "core/version.h"
 
 namespace fs = std::filesystem;
@@ -21,6 +23,10 @@ constexpr int64_t kDiskWarningRepeatSeconds = 24 * 3600;
 constexpr int64_t kOutageWarningRepeatSeconds = 6 * 3600;
 constexpr const char* kDiskWarnedKey = "disk_warned_at";
 constexpr const char* kOutageWarnedKey = "outage_warned_at";
+constexpr const char* kLastBackupKey = "last_backup_at";
+constexpr const char* kLastBackupPathKey = "last_backup_path";
+constexpr const char* kBackupSinceKey = "backup_watch_since";  // when counting started on a database never backed up
+constexpr const char* kBackupRemindedKey = "backup_reminded_at";
 
 bool due(const std::string& last_iso, int64_t every) { return last_iso.empty() || unix_now() - iso_to_unix(last_iso) >= every; }
 
@@ -29,7 +35,8 @@ std::string ago(const std::string& iso) {
     const int64_t s = unix_now() - iso_to_unix(iso);
     if (s < 120) return "just now";
     if (s < 7200) return std::to_string(s / 60) + " min ago";
-    return std::to_string(s / 3600) + " h ago";
+    if (s < 2 * 86400) return std::to_string(s / 3600) + " h ago";
+    return std::to_string(s / 86400) + " days ago";
 }
 
 }  // namespace
@@ -119,7 +126,29 @@ std::string AdminService::status_text() {
     }
     const std::string channel = repo_.meta(kPublicChannelKey);
     m << "\n**Arena channel:** " << (channel.empty() ? "not set (public bots cannot report)" : "<#" + channel + ">");
-    m << "\n\n`admin add <user ID>` | `admin remove <user ID>` | `admin movedb <folder>` | `admin channel <channel ID>`";
+    const std::string last = last_backup_at();
+    const bool overdue = last.empty() || unix_now() - iso_to_unix(last) >= kBackupReminderAfterSeconds;
+    m << "\n**Last backup:** " << ago(last) << (overdue ? " \xE2\x9A\xA0\xEF\xB8\x8F" : "");
+    if (!last.empty()) m << " (`" << repo_.meta(kLastBackupPathKey) << "`)";
+    m << " | **reminders:** "
+      << (trim(config_.backup_email).empty() ? "Discord only (add an email with `admin email you@example.com`)" : "Discord and " + config_.backup_email);
+
+    // Markets of the stocks being watched: their prices are only checked while they're open.
+    std::vector<const Market*> watched_markets;
+    for (const auto& symbol : repo_.watched_symbols()) {
+        const Market* market = market_for_symbol(symbol);
+        if (market && std::find(watched_markets.begin(), watched_markets.end(), market) == watched_markets.end()) watched_markets.push_back(market);
+    }
+    if (!watched_markets.empty()) {
+        m << "\n**Markets of watched stocks** (" << local_utc_label(unix_now()) << "):";
+        for (size_t i = 0; i < watched_markets.size(); ++i) {
+            const MarketRow row = market_row(*watched_markets[i], unix_now());
+            m << (i ? "; " : " ") << watched_markets[i]->name << " " << (row.open ? "**" + row.status + "**" : row.status);
+        }
+        m << " (all: `/market`)";
+    }
+    m << "\n\n`admin add <user ID>` | `admin remove <user ID>` | `admin movedb <folder>` | `admin channel <channel ID>` | "
+         "`admin backup` | `admin email <address>`";
     return m.str();
 }
 
@@ -208,6 +237,12 @@ CommandReply AdminService::run(const std::string& user, const std::vector<std::s
                                       : CommandReply{false, "<@" + id + "> was not an admin."};
     }
     if (sub == "movedb") return move_database(rest());
+    if (sub == "backup") {
+        const BackupResult b = create_backup();
+        return b.ok ? CommandReply{true, "Backup saved on the server: `" + b.path + "` (" + format_bytes(b.bytes) + ")."}
+                    : CommandReply{false, "The backup failed: " + b.error};
+    }
+    if (sub == "email") return set_email(rest());
     if (sub == "channel") {
         std::string text = rest();
         text.erase(std::remove_if(text.begin(), text.end(), [](char c) { return c == '<' || c == '>' || c == '#'; }), text.end());
@@ -225,7 +260,118 @@ CommandReply AdminService::run(const std::string& user, const std::vector<std::s
                       "send messages there."};
     }
     return {false, "Admin commands: `admin`, `admin add <user ID>`, `admin remove <user ID>`, `admin list`, "
-                   "`admin movedb <folder>`, `admin channel <channel ID>`."};
+                   "`admin movedb <folder>`, `admin channel <channel ID>`, `admin backup`, `admin email <address>|test|off`."};
+}
+
+std::string AdminService::backup_folder() const {
+    return resolve_config_path(config_path_, trim(config_.backup_folder).empty() ? "backups" : config_.backup_folder);
+}
+
+std::string AdminService::last_backup_at() { return repo_.meta(kLastBackupKey); }
+
+BackupResult AdminService::create_backup() {
+    BackupResult r;
+    if (db_.path() == ":memory:") {
+        r.error = "this database is in memory and can't be backed up";
+        return r;
+    }
+    std::string stamp = utc_now_iso();
+    for (char& c : stamp) {
+        if (c == ':') c = '-';
+    }
+    fs::path file = utf8_path(backup_folder()) / ("strojanka-" + stamp + kBackupExtension);
+    std::error_code exists_ec;
+    for (int n = 2; fs::exists(file, exists_ec); ++n) {  // two backups within the same second
+        file = utf8_path(backup_folder()) / ("strojanka-" + stamp + "-" + std::to_string(n) + kBackupExtension);
+    }
+    try {
+        db_.backup_to(path_utf8(file));
+    } catch (const std::exception& e) {
+        r.error = e.what();
+        log_warn("backup failed: " + r.error);
+        return r;
+    }
+    std::error_code ec;
+    r.ok = true;
+    r.path = path_utf8(file);
+    r.bytes = fs::file_size(file, ec);
+    repo_.set_meta(kLastBackupKey, utc_now_iso());
+    repo_.set_meta(kLastBackupPathKey, r.path);
+    log_info("backup saved to " + r.path + " (" + format_bytes(r.bytes) + ")");
+    return r;
+}
+
+CommandReply AdminService::set_email(const std::string& text) {
+    const std::string address = trim(text);
+    if (address.empty()) {
+        return {true, trim(config_.backup_email).empty()
+                          ? "No email is set for backup reminders. Set one with `admin email you@example.com`, and put the "
+                            "mailbox's password in `smtp_password` in strojanka.conf (Gmail: an app password)."
+                          : "Backup reminders also go to **" + config_.backup_email + "**. `admin email test` sends a test message, "
+                            "`admin email off` stops them."};
+    }
+    if (to_lower(address) == "test") {
+        std::string error;
+        if (!send_email(config_, "Strojanka test message",
+                        "This is a test from Strojanka. Backup reminders will arrive like this when the database hasn't been "
+                        "backed up for 3 weeks.",
+                        &error)) {
+            return {false, "The test email could not be sent: " + error};
+        }
+        return {true, "A test email was sent to **" + config_.backup_email + "**."};
+    }
+    const bool off = to_lower(address) == "off";
+    if (!off && (address.find('@') == std::string::npos || address.find(' ') != std::string::npos)) {
+        return {false, "`" + address + "` doesn't look like an email address."};
+    }
+    std::string error;
+    auto cfg = load_config(config_path_, &error);
+    if (!cfg) return {false, "Could not read the settings file: " + error};
+    cfg->backup_email = off ? "" : address;
+    if (!save_config(*cfg, config_path_, &error)) return {false, "Could not save the settings file: " + error};
+    config_.backup_email = cfg->backup_email;
+    if (off) return {true, "Backup reminders now only go to admins in Discord."};
+    std::string note;
+    if (cfg->smtp_password.empty()) {
+        note = " Put the mailbox's password in `smtp_password` in strojanka.conf (Gmail: create an app password), restart the "
+               "bot, then try `admin email test`.";
+    }
+    if (trim(cfg->smtp_server).empty() && guess_smtp_server(address).empty()) {
+        note += " The mail server for this address isn't known: set `smtp_server` (for example `smtps://smtp.example.com:465`).";
+    }
+    return {true, "Backup reminders will also go to **" + address + "**." + note};
+}
+
+void AdminService::remind_backup(Notifier& notifier) {
+    const int64_t now = unix_now();
+    std::string since = repo_.meta(kBackupSinceKey);
+    if (since.empty()) {
+        since = utc_now_iso();
+        repo_.set_meta(kBackupSinceKey, since);
+    }
+    const std::string last = last_backup_at();
+    const std::string counted_from = last.empty() ? since : last;
+    if (now - iso_to_unix(counted_from) < kBackupReminderAfterSeconds) return;
+    const std::string reminded = repo_.meta(kBackupRemindedKey);
+    const bool first = reminded.empty() || iso_to_unix(reminded) < iso_to_unix(counted_from);
+    if (!first && now - iso_to_unix(reminded) < kBackupReminderRepeatSeconds) return;
+
+    const int64_t days = (now - iso_to_unix(counted_from)) / 86400;
+    const std::string body = (last.empty() ? "The Strojanka database hasn't been backed up yet (" + std::to_string(days) + " days)."
+                                           : "The Strojanka database was last backed up " + std::to_string(days) + " days ago.") +
+                             " Make a backup: press Backup in the Strojanka Server window, type `backup` in its console, or send "
+                             "`admin backup` to the bot in Discord. Backups are saved in " + backup_folder() +
+                             "; copy them to another drive or a cloud folder to be safe.";
+    warn_admins(notifier, "\xF0\x9F\x92\xBE **Backup needed.** " + body);
+    if (!trim(config_.backup_email).empty()) {
+        std::string error;
+        if (send_email(config_, "Strojanka: time for a backup", body + "\n\nThis reminder repeats every 2 days until a backup is made.", &error)) {
+            log_info("backup reminder emailed to " + config_.backup_email);
+        } else {
+            log_warn("backup reminder email failed: " + error);
+        }
+    }
+    repo_.set_meta(kBackupRemindedKey, utc_now_iso());
 }
 
 void AdminService::warn_admins(Notifier& notifier, const std::string& message) {
@@ -259,6 +405,7 @@ void AdminService::check_health(Notifier& notifier) {
                                   cycle.last_error + "\nCheck the computer's internet connection.");
         repo_.set_meta(kOutageWarnedKey, utc_now_iso());
     }
+    remind_backup(notifier);
 }
 
 }  // namespace strojanka

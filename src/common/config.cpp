@@ -49,6 +49,11 @@ std::optional<Config> load_config(const std::string& path, std::string* error) {
         else if (key == "installed_version") c.installed_version = value;
         else if (key == "screener_symbols") c.screener_symbols = value;
         else if (key == "low_disk_warning_mb") c.low_disk_warning_mb = to_int(value, c.low_disk_warning_mb);
+        else if (key == "backup_folder") c.backup_folder = value;
+        else if (key == "backup_email") c.backup_email = value;
+        else if (key == "smtp_server") c.smtp_server = value;
+        else if (key == "smtp_user") c.smtp_user = value;
+        else if (key == "smtp_password") c.smtp_password = value;
         // Unknown keys are ignored so older builds can read configs written by newer ones.
     }
     if (c.poll_interval_minutes < 1) c.poll_interval_minutes = 1;
@@ -74,7 +79,16 @@ bool save_config(const Config& c, const std::string& path, std::string* error) {
         << "# Stocks the `suggest` command screens, comma-separated. Empty = about 70 large US stocks.\n"
         << "screener_symbols=" << c.screener_symbols << "\n"
         << "# Admins get a Discord warning when the database drive has less free space than this (MB).\n"
-        << "low_disk_warning_mb=" << c.low_disk_warning_mb << "\n";
+        << "low_disk_warning_mb=" << c.low_disk_warning_mb << "\n"
+        << "# Where the Backup button saves .strojanka_backup files. Best on another drive than the database.\n"
+        << "backup_folder=" << c.backup_folder << "\n"
+        << "# Email for backup reminders (3 weeks without a backup, then every 2 days). Empty = Discord only.\n"
+        << "backup_email=" << c.backup_email << "\n"
+        << "# Mail server that sends it, e.g. smtps://smtp.gmail.com:465. Empty = chosen from the address.\n"
+        << "smtp_server=" << c.smtp_server << "\n"
+        << "# Login for that server (empty = the address above) and its password; Gmail needs an app password.\n"
+        << "smtp_user=" << c.smtp_user << "\n"
+        << "smtp_password=" << c.smtp_password << "\n";
 
     std::error_code ec;
     const fs::path p = utf8_path(path);

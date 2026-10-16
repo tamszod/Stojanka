@@ -151,12 +151,24 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
             return finish(1, opt.unattended);
         }
         const std::string default_db = path_utf8(utf8_path(req.dir) / "data" / "strojanka.db");
-        if (!opt.db_existing.empty()) req.database_path = opt.db_existing;
+        if (!opt.restore.empty()) {
+            req.restore_backup = opt.restore;
+            req.database_path = default_db;
+        } else if (!opt.db_existing.empty()) req.database_path = opt.db_existing;
         else if (!opt.db_new.empty()) req.database_path = opt.db_new;
         else if (!opt.unattended) {
-            std::cout << "\nDatabase\n  1) Create a new database\n  2) Use an existing database file\n";
-            const bool use_existing = ask("Choose 1 or 2", "1") == "2";
-            for (;;) {
+            std::cout << "\nDatabase\n  1) Create a new database\n  2) Use an existing database file\n  3) Restore a .strojanka_backup\n";
+            const std::string db_choice = ask("Choose 1, 2 or 3", "1");
+            const bool use_existing = db_choice == "2";
+            if (db_choice == "3") {
+                for (;;) {
+                    req.restore_backup = ask("Path of the .strojanka_backup file", "");
+                    if (fs::exists(utf8_path(req.restore_backup))) break;
+                    std::cout << "  File not found.\n";
+                }
+                req.database_path = default_db;
+            }
+            for (; db_choice != "3";) {
                 req.database_path = ask(use_existing ? "Path of the existing database" : "New database file", use_existing ? "" : default_db);
                 if (!use_existing || fs::exists(utf8_path(req.database_path))) break;
                 std::cout << "  File not found.\n";
@@ -167,6 +179,12 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
         if (!opt.db_existing.empty() && !fs::exists(utf8_path(opt.db_existing))) {
             std::cerr << "ERROR: database not found: " << opt.db_existing << "\n";
             return finish(1, opt.unattended);
+        }
+        req.backup_email = opt.email;
+        req.smtp_password = opt.email_password;
+        if (opt.email.empty() && !opt.unattended) {
+            req.backup_email = ask("Email for backup reminders (optional, Enter to skip)", "");
+            if (!req.backup_email.empty()) req.smtp_password = ask_secret("Its app password (Gmail: Google Account > Security > App passwords)");
         }
         req.poll_minutes = opt.poll > 0 ? opt.poll : 15;
         if (opt.poll <= 0 && !opt.unattended) {

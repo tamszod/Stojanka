@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "common/strings.h"
+#include "core/markets.h"
 #include "core/messages.h"
 #include "core/admin_service.h"
 #include "core/arena/arena_service.h"
@@ -41,26 +42,19 @@ CommandReply CommandService::help() const {
     std::ostringstream m;
     m << "**Strojanka " << STROJANKA_VERSION << "** watches your stocks and tells you when they reach a PEAK "
       << "(time to sell) or a SUPPORT level (time to buy).\n\n"
-      << "`/help` - this message\n"
-      << "`/status` - your watched stocks with price, trend and how much money you have in them\n"
-      << "`/profit` - profit for every stock you traded; `/profit stock:FCX` for one stock\n"
-      << "`/portfolio` - what you hold now: shares, average cost, value, weight and profit\n"
-      << "`/history` - every buy and sell you recorded, with the profit of each sale; `/history stock:FCX` for one stock\n"
-      << "`/monitor stock:FCX` - start watching a stock or ETF (you get an analysis report). ETFs work the same: "
-      << "`SPY`, or a European listing with its exchange ending such as `CSPX.L` (London) or `SXR8.DE` (Xetra)\n"
-      << "`/remove stock:FCX` - stop watching a stock (only when you hold no shares of it)\n"
-      << "`/buy stock:FCX shares:0.858291457 paid:59.78$` - record a purchase; `paid` is the total you paid\n"
-      << "`/sell stock:FCX shares:0.858291457 received:67.87$` - record a sale; `received` is the total you got\n"
-      << "`/report stock:FCX` - fresh analysis: category, support/resistance, learned accuracy\n"
-      << "`/suggest` - stocks whose signals have proven reliable; `/suggest side:buy` or `side:sell` for one kind\n"
-      << "`/news stock:FCX` - recent headlines, their tone, and how news affects the signals\n"
-      << "`/arena` - the paper-trading bots ($1,000 each) and how they are doing; `/arena bot:Athena` for one bot\n"
-      << "`/pythia` - the built-in AI model: how well it did on years it never saw, and today's strongest candidates\n"
-      << "`/politicians` - recent US Congress stock trades; `monitor politician:Pelosi` to watch one personally (DM on a new trade)\n"
-      << "`/admin` - admin panel: disk space, database location, admins (admins only)\n\n"
-      << "In a direct message with me you can also just type the command, for example "
-      << "`buy FCX 0.858291457 59.78$`, `sell FCX 0.858291457 67.87$`, `profit FCX` or `status`.\n\n"
-      << "Alerts arrive as direct messages. PEAK alerts are only sent for stocks you hold.\n"
+      << "`/status` - your watched stocks: price, trend, value | `/portfolio` - what you hold, with profit\n"
+      << "`/profit` - profit per stock | `/history` - every buy and sell (`stock:FCX` for one)\n"
+      << "`/monitor stock:FCX` - watch a stock or ETF and get a report; outside the US add the exchange ending, "
+      << "e.g. `CSPX.L` (London), `OTP.BD` (Budapest)\n"
+      << "`/remove stock:FCX` - stop watching (only when you hold none)\n"
+      << "`/buy stock:FCX shares:0.858291457 paid:59.78$` / `/sell ... received:67.87$` - record a trade (total amounts)\n"
+      << "`/report stock:FCX` - analysis | `/news stock:FCX` - headlines | `/suggest` - stocks with proven signals\n"
+      << "`/market` - exchanges: ticker ending, opening hours, open now?\n"
+      << "`/arena` - paper-trading bots | `/pythia` - the built-in AI model\n"
+      << "`/politicians` - US Congress stock trades; `monitor politician:Pelosi` for a DM on a new one\n"
+      << "`/admin` - admin panel, backups (admins only)\n\n"
+      << "You can also just type commands here, e.g. `buy FCX 0.858291457 59.78$` or `status`. "
+      << "Alerts arrive as direct messages; PEAK only for stocks you hold.\n"
       << "*Signals are statistical estimates, not financial advice.*";
     return {true, m.str()};
 }
@@ -391,6 +385,37 @@ CommandReply CommandService::history(const std::string& user, const std::string&
     return {true, m.str()};
 }
 
+CommandReply CommandService::market(const std::string& user, const std::string& filter_input) {
+    (void)user;
+    const int64_t now = unix_now();
+    const std::string filter = to_lower(trim(filter_input));
+    std::vector<MarketRow> rows;
+    for (const auto& m : markets()) {
+        const bool match = filter.empty() || to_lower(m.name).find(filter) != std::string::npos || to_lower(m.suffix) == filter ||
+                           to_lower(m.suffix) == "." + filter;
+        if (match) rows.push_back(market_row(m, now));
+    }
+    if (rows.empty()) return fail("No market matches **" + trim(filter_input) + "**. Type `/market` for the list.");
+
+    std::ostringstream m;
+    m << "**Markets** (times are this computer's, " << local_utc_label(now) << ")\n```\n"
+      << pad("MARKET", 11) << pad("ENDING", 7) << pad("HOURS", 13) << "NOW\n";
+    for (const auto& r : rows) {
+        m << pad(r.market->name, 11) << pad(r.market->suffix.empty() ? "-" : r.market->suffix, 7) << pad(r.hours, 13) << r.status << "\n";
+    }
+    m << "```";
+    if (rows.size() <= 3) {
+        for (const auto& r : rows) {
+            m << "\n**" << r.market->name << "**: add its stocks with the ending " << (r.market->suffix.empty() ? "(none)" : "`" + r.market->suffix + "`")
+              << ", for example `/monitor stock:" << r.market->example << "`.";
+        }
+    } else {
+        m << "ENDING goes after the ticker when you add a stock: `/monitor stock:BARC.L` (London). US tickers have none. "
+             "* = lunch break. Public holidays aren't included. While a stock's market is closed its prices aren't checked.";
+    }
+    return {true, m.str()};
+}
+
 CommandReply CommandService::monitor(const std::string& user, const std::string& input) {
     std::string symbol;
     CommandReply err;
@@ -611,6 +636,7 @@ CommandReply CommandService::run_text(const std::string& user, const std::string
     if (name == "status") return status(user);
     if (name == "profit") return profit(user, arg(1));
     if (name == "portfolio" || name == "holdings") return portfolio(user);
+    if (name == "market" || name == "markets") return market(user, rest(1));
     if (name == "history" || name == "trades") return history(user, arg(1));
     if (name == "monitor") {
         if (words.size() >= 2 && to_lower(words[1]) == "politician") {

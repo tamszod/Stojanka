@@ -1,6 +1,7 @@
 // StrojankaServer: runs the bot inside a window with a live dashboard, the log and a command line.
 // strojanka.exe remains the windowless version for servers and scripts; both use BotHost.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <deque>
@@ -20,6 +21,7 @@
 #include "common/strings.h"
 #include "common/utf8_path.h"
 #include "core/log.h"
+#include "core/markets.h"
 #include "core/thread_pool.h"
 #include "core/version.h"
 #include "server/server_ui.h"  // generated from ui/server.html: kServerHtml
@@ -249,6 +251,8 @@ int main(int argc, char** argv) {
                 {"cycle_refreshed", cycle.refreshed},
                 {"cycle_total", cycle.total},
                 {"cycle_failures", cycle.failed_cycles_in_a_row},
+                {"last_backup_at", host.admin().last_backup_at()},
+                {"last_backup_path", repo.meta("last_backup_path")},
             };
             return s.dump();
         });
@@ -263,6 +267,26 @@ int main(int argc, char** argv) {
                                 {"category", r.category}, {"watchers", r.watchers}, {"last_signal", r.last_signal}});
             }
             return rows.dump();
+        });
+
+        w.bind("serverMarkets", [&](const std::string&) {
+            const int64_t now = unix_now();
+            std::vector<const Market*> watched;
+            {
+                std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
+                if (lock.owns_lock() && host.running()) {
+                    for (const auto& symbol : host.repository().watched_symbols()) {
+                        if (const Market* m = market_for_symbol(symbol)) watched.push_back(m);
+                    }
+                }
+            }
+            json rows = json::array();
+            for (const auto& m : markets()) {
+                const MarketRow r = market_row(m, now);
+                rows.push_back({{"name", m.name}, {"suffix", m.suffix}, {"example", m.example}, {"hours", r.hours}, {"open", r.open},
+                                {"status", r.status}, {"watched", std::find(watched.begin(), watched.end(), &m) != watched.end()}});
+            }
+            return json{{"rows", rows}, {"zone", local_utc_label(now)}}.dump();
         });
 
         w.bind("arenaBots", [&](const std::string&) {

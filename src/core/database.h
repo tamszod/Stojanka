@@ -69,6 +69,8 @@ public:
     // integrity, switches this connection to it and deletes the old files. On any failure the old
     // file stays in use and DatabaseError is thrown. Callers must not hold Statements across this.
     void move_to(const std::string& new_path);
+    // Writes a checked, consistent copy of the database to `path` (a new file) while it stays in use.
+    void backup_to(const std::string& path);
 
 private:
     sqlite3* db_ = nullptr;

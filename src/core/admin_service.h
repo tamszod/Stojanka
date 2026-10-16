@@ -18,6 +18,17 @@ namespace strojanka {
 // it now means "the public announcements channel" more broadly, not just the arena.
 inline constexpr const char* kPublicChannelKey = "arena_channel_id";
 
+inline constexpr const char* kBackupExtension = ".strojanka_backup";
+inline constexpr int64_t kBackupReminderAfterSeconds = 21 * 86400;  // 3 weeks without a backup
+inline constexpr int64_t kBackupReminderRepeatSeconds = 2 * 86400;  // then every 2 days until there is one
+
+struct BackupResult {
+    bool ok = false;
+    std::string path;
+    uint64_t bytes = 0;
+    std::string error;
+};
+
 // The `admin` command and the bot's own health checks. Admins are the owner(s) of the Discord
 // application (detected automatically) plus anyone they add. Admins receive warnings such as
 // low disk space, and can move the database to another folder or drive while the bot runs.
@@ -39,8 +50,14 @@ public:
     // Moves the database into `folder` (keeping its file name) and updates strojanka.conf.
     CommandReply move_database(const std::string& folder);
 
-    // Hourly check: low disk space on the database drive, price data unreachable. Sends each
-    // warning to every admin through `notifier`, at most once per day (outage: every 6 hours).
+    // Saves a checked copy of the database as <backup_folder>/strojanka-<time>.strojanka_backup.
+    BackupResult create_backup();
+    std::string backup_folder() const;   // absolute
+    std::string last_backup_at();        // ISO UTC, "" = never
+
+    // Hourly check: low disk space on the database drive, price data unreachable, no backup for
+    // 3 weeks. Sends each warning to every admin through `notifier`, at most once per day (outage:
+    // every 6 hours; backup: every 2 days, also by email when backup_email is set).
     void check_health(Notifier& notifier);
 
     struct Disk {
@@ -52,7 +69,9 @@ public:
 
 private:
     CommandReply run(const std::string& user, const std::vector<std::string>& args);
+    CommandReply set_email(const std::string& address);
     void warn_admins(Notifier& notifier, const std::string& message);
+    void remind_backup(Notifier& notifier);
 
     Database& db_;
     Repository& repo_;

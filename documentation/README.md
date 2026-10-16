@@ -26,6 +26,9 @@ trading history and your profit.
 - **Runs a trading-bot arena.** Thirteen bots named after Greek and Roman gods trade $1,000 of play
   money each. Only the ones that prove themselves on years of old prices *and* months of live
   prices report their trades and profits in your Discord server.
+- **Knows the markets.** `/market` shows every exchange's ticker ending, hours and whether it's open;
+  prices aren't fetched while a stock's market is closed.
+- **Backs up your data** with one button, and reminds you (also by email) when a backup is overdue.
 - **Tracks politician stock trades.** Checks daily for newly disclosed US Congress stock trades and
   posts them in your Discord server; you can also watch a specific politician.
 

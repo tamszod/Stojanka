@@ -33,7 +33,8 @@ std::string ServerConsole::help() const {
            "`users` - Discord users with how many stocks they watch and trade\n"
            "`check` - run a price check for all watched stocks now\n"
            "`screen` - re-run the `suggest` screener now (takes about 15 s)\n"
-           "`report FCX` | `news FCX` | `suggest [buy|sell]` | `pythia` - same as in Discord\n"
+           "`report FCX` | `news FCX` | `suggest [buy|sell]` | `pythia` | `market [name]` - same as in Discord\n"
+           "`backup` - save the database now as a .strojanka_backup file (same as the Backup button)\n"
            "`as <user ID> <command>` - run a Discord command as that user, e.g. `as 3550... status`\n"
            "`arena` - all trading bots, including private ones | `arena Athena` - one bot in detail\n"
            "`arena run` - trade and re-judge now | `arena channel <channel ID>` - where public bots report\n"
@@ -108,7 +109,7 @@ CommandReply ServerConsole::run(const std::string& line) {
     if (cmd == "users") return {true, users()};
     if (cmd == "admin") return admin_.handle_console(rest);
     if (cmd == "check") {
-        monitor_.run_cycle();
+        monitor_.run_cycle(true);  // asked for: check every stock, even where the market is closed
         const CycleStats c = monitor_.last_cycle();
         return {c.total == 0 || c.refreshed > 0,
                 c.total == 0 ? "No stocks are being watched, nothing to check."
@@ -136,7 +137,11 @@ CommandReply ServerConsole::run(const std::string& line) {
         repo_.ensure_user(user, "");
         return commands_.run_text(user, command);
     }
-    if (cmd == "report" || cmd == "news" || cmd == "suggest" || cmd == "pythia" || cmd == "ai") {
+    if (cmd == "backup") {
+        const BackupResult b = admin_.create_backup();
+        return {b.ok, b.ok ? "Backup saved: `" + b.path + "` (" + format_bytes(b.bytes) + ")." : "Backup failed: " + b.error};
+    }
+    if (cmd == "report" || cmd == "news" || cmd == "suggest" || cmd == "pythia" || cmd == "ai" || cmd == "market" || cmd == "markets") {
         return commands_.run_text("console", line);
     }
     if (cmd == "arena") {

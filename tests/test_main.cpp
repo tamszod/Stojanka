@@ -41,6 +41,8 @@
 #include "core/ml/gbdt.h"
 #include "core/ml/pythia.h"
 #include "core/archive.h"
+#include "core/email.h"
+#include "core/markets.h"
 #include "core/pdf_crypto.h"
 #include "core/politicians/house_clerk.h"
 #include "core/politicians/politician_service.h"
@@ -1345,6 +1347,129 @@ void test_company_names() {
     CHECK(starts_with(support_alert("FCX", "", 50, "USD", 49, 0.7, learning), "**FCX** has reached SUPPORT level."));
 }
 
+void test_markets(const fs::path& dir) {
+    CHECK(market_for_symbol("AAPL")->name == "US");
+    CHECK(market_for_symbol("BRK-B")->name == "US");
+    CHECK(market_for_symbol("BARC.L")->name == "London");
+    CHECK(market_for_symbol("OTP.BD")->name == "Budapest");
+    CHECK(market_for_symbol("7203.T")->name == "Tokyo");
+    CHECK(market_for_symbol("BTC-USD") == nullptr);   // crypto trades around the clock
+    CHECK(market_for_symbol("EURUSD=X") == nullptr);  // currencies
+    CHECK(market_for_symbol("ABC.XX") == nullptr);    // unknown ending: always checked
+    const Market& us = *market_for_symbol("AAPL");
+    const Market& london = *market_for_symbol("BARC.L");
+    const Market& sydney = *market_for_symbol("BHP.AX");
+    const Market& tokyo = *market_for_symbol("7203.T");
+    const Market& budapest = *market_for_symbol("OTP.BD");
+    auto t = [](const char* iso) { return iso_to_unix(iso); };
+
+    // Daylight saving switches in 2026: US 8 Mar 07:00 UTC / 1 Nov 06:00 UTC; EU 29 Mar / 25 Oct 01:00 UTC;
+    // Sydney 4 Oct (3 Oct 16:00 UTC) / 5 Apr (4 Apr 16:00 UTC).
+    CHECK(utc_offset_minutes(us, t("2026-03-08T06:59:59Z")) == -300 && utc_offset_minutes(us, t("2026-03-08T07:00:00Z")) == -240);
+    CHECK(utc_offset_minutes(us, t("2026-11-01T05:59:59Z")) == -240 && utc_offset_minutes(us, t("2026-11-01T06:00:00Z")) == -300);
+    CHECK(utc_offset_minutes(london, t("2026-03-29T00:59:59Z")) == 0 && utc_offset_minutes(london, t("2026-03-29T01:00:00Z")) == 60);
+    CHECK(utc_offset_minutes(budapest, t("2026-10-25T00:59:59Z")) == 120 && utc_offset_minutes(budapest, t("2026-10-25T01:00:00Z")) == 60);
+    CHECK(utc_offset_minutes(sydney, t("2026-10-16T00:00:00Z")) == 660);  // what Yahoo reported that day
+    CHECK(utc_offset_minutes(sydney, t("2026-04-04T15:59:59Z")) == 660 && utc_offset_minutes(sydney, t("2026-04-04T16:00:00Z")) == 600);
+    CHECK(utc_offset_minutes(sydney, t("2026-10-03T15:59:59Z")) == 600 && utc_offset_minutes(sydney, t("2026-10-03T16:00:00Z")) == 660);
+
+    // Friday 2026-10-16: US open 13:30-20:00 UTC; Saturday closed; next open Monday 13:30 UTC.
+    CHECK(!market_open(us, t("2026-10-16T13:29:59Z")) && market_open(us, t("2026-10-16T13:30:00Z")));
+    CHECK(market_open(us, t("2026-10-16T19:59:59Z")) && !market_open(us, t("2026-10-16T20:00:00Z")));
+    CHECK(!market_open(us, t("2026-10-17T15:00:00Z")));
+    CHECK(next_open(us, t("2026-10-17T15:00:00Z")) == t("2026-10-19T13:30:00Z"));
+    CHECK(last_close(us, t("2026-10-17T15:00:00Z")) == t("2026-10-16T20:00:00Z"));
+    CHECK(next_close(us, t("2026-10-16T14:00:00Z")) == t("2026-10-16T20:00:00Z"));
+    // Budapest 09:00-17:00 CEST = 07:00-15:00 UTC; Tokyo closes for lunch 11:30-12:30 JST.
+    CHECK(market_open(budapest, t("2026-10-16T14:59:00Z")) && !market_open(budapest, t("2026-10-16T15:00:00Z")));
+    CHECK(market_open(tokyo, t("2026-10-16T02:00:00Z")) && !market_open(tokyo, t("2026-10-16T03:00:00Z")));
+    CHECK(next_open(tokyo, t("2026-10-16T03:00:00Z")) == t("2026-10-16T03:30:00Z"));
+
+    const MarketRow row = market_row(tokyo, t("2026-10-16T03:00:00Z"));
+    CHECK(!row.open && starts_with(row.status, "opens ") && row.hours.back() == '*');  // * = lunch break
+    CHECK(starts_with(market_row(us, t("2026-10-16T14:00:00Z")).status, "OPEN until "));
+
+    Database db(path_utf8(dir / "markets.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    FakeProvider provider;
+    Config config;
+    MonitorService monitor(repo, provider, config);
+    CommandService cmd(repo, monitor);
+    const auto all = cmd.market("u1", "");
+    CHECK(all.ok && all.text.size() < 2000);
+    CHECK(all.text.find(".BD") != std::string::npos && all.text.find("Budapest") != std::string::npos);
+    CHECK(cmd.run_text("u1", "market budapest").text.find("/monitor stock:OTP.BD") != std::string::npos);
+    CHECK(cmd.market("u1", ".L").text.find("London") != std::string::npos);
+    CHECK(!cmd.market("u1", "atlantis").ok);
+}
+
+void test_backups(const fs::path& dir) {
+    const fs::path home = dir / "backup_home";
+    fs::create_directories(home);
+    const std::string conf = path_utf8(home / "strojanka.conf");
+    Config config;
+    config.backup_folder = "saved";
+    CHECK(save_config(config, conf, nullptr));
+    Database db(path_utf8(home / "strojanka.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    repo.ensure_user("355014703254339595", "");
+    repo.add_admin("355014703254339595", "test");
+    FakeProvider provider;
+    MonitorService monitor(repo, provider, config);
+    AdminService admin(db, repo, monitor, config, conf);
+
+    CHECK(admin.last_backup_at().empty());
+    const BackupResult b = admin.create_backup();
+    CHECK(b.ok);
+    CHECK(fs::exists(utf8_path(b.path)) && b.path.find(".strojanka_backup") != std::string::npos);
+    CHECK(utf8_path(b.path).parent_path() == home / "saved");
+    std::ifstream f(utf8_path(b.path), std::ios::binary);
+    char header[16] = {};
+    f.read(header, 16);
+    CHECK(std::string(header, 15) == "SQLite format 3");  // a plain SQLite database: the installer can restore it
+    {
+        Database copy(b.path);  // opens and holds the same data
+        Repository copy_repo(copy);
+        CHECK(copy_repo.admins().size() == 1);
+    }
+    CHECK(!admin.last_backup_at().empty());
+    CHECK(admin.status_text().find("Last backup:** just now") != std::string::npos);
+    CHECK(admin.handle_console({"backup"}).ok);
+
+    // Reminders: none while backups are recent; after 3 weeks, then again only after 2 more days.
+    RecordingNotifier notifier;
+    auto reminders = [&] {
+        size_t n = 0;
+        for (const auto& [user, message] : notifier.direct) n += message.find("Backup needed") != std::string::npos;
+        return n;
+    };
+    admin.check_health(notifier);
+    CHECK(reminders() == 0);
+    repo.set_meta("last_backup_at", unix_to_iso(unix_now() - 22 * 86400));
+    admin.check_health(notifier);
+    CHECK(reminders() == 1);
+    admin.check_health(notifier);
+    CHECK(reminders() == 1);  // not again within 2 days
+    repo.set_meta("backup_reminded_at", unix_to_iso(unix_now() - 3 * 86400));
+    admin.check_health(notifier);
+    CHECK(reminders() == 2);
+    CHECK(admin.create_backup().ok);
+    repo.set_meta("backup_reminded_at", "");
+    admin.check_health(notifier);
+    CHECK(reminders() == 2);  // a fresh backup stops them
+
+    // `admin email` saves the address in the settings file; a test without a password explains why it can't send.
+    CHECK(admin.handle_console({"email", "someone@gmail.com"}).ok);
+    CHECK(load_config(conf, nullptr)->backup_email == "someone@gmail.com");
+    const auto test_mail = admin.handle_console({"email", "test"});
+    CHECK(!test_mail.ok && test_mail.text.find("smtp_password") != std::string::npos);
+    CHECK(guess_smtp_server("x@gmail.com") == "smtps://smtp.gmail.com:465");
+    CHECK(guess_smtp_server("x@company.hu").empty());
+    CHECK(admin.handle_console({"email", "off"}).ok && load_config(conf, nullptr)->backup_email.empty());
+}
+
 void test_update_backup(const fs::path& dir) {
     const std::string install = path_utf8(dir / "install_for_revert");
     CHECK(!read_update_backup(install).has_value());
@@ -1668,6 +1793,8 @@ int main() {
         {"portfolio and trading history", [&] { test_portfolio_and_history(dir); }},
         {"short company names", test_company_names},
         {"update backup: write, read, expire", [&] { test_update_backup(dir); }},
+        {"markets: endings, daylight saving, hours, /market", [&] { test_markets(dir); }},
+        {"backups: file, reminders, email setting", [&] { test_backups(dir); }},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

@@ -97,6 +97,22 @@ If you bought at several prices, the bot uses your **average cost**. Example: yo
 $100, then 2 more for $140. Your average cost is $60 per share. Selling 1 share for $75 is a
 realized profit of $15.
 
+## /market and /market market:London
+Every stock exchange the bot knows: the **ending** to put after a ticker to add a stock there (`.L`
+London, `.DE` Xetra, `.BD` Budapest; US tickers have none), today's or the next trading hours in
+the bot computer's time, and whether it is open now. With a name or ending, just that market and an
+example. As text: `market` or `market budapest`.
+
+```
+MARKET     ENDING HOURS        NOW
+US         -      15:30-22:00  OPEN until 22:00
+London     .L     09:00-17:30  OPEN until 17:30
+Tokyo      .T     02:00-08:30* opens Mon 02:00
+```
+
+\* = lunch break. Public holidays aren't included, so a market shows as open on one. While a stock's
+market is closed its price isn't checked.
+
 ## /portfolio
 What you hold right now: shares, average cost, current price, value, its weight (share of your
 holdings in that currency) and the profit or loss on it, with totals per currency. As text:
@@ -185,6 +201,8 @@ automatically an admin.** They can add others, and every admin receives the bot'
 | `/admin status` or `admin` | The admin panel: database location and size, free disk space, number of users, stocks, trades, alerts and stored headlines, the last price check, the news weight, and the admin list. |
 | `/admin add user:@someone` or `admin add <user ID>` | Makes someone an admin. To copy an ID, turn on Developer Mode in Discord, right-click the person and choose **Copy User ID**. |
 | `/admin remove user:@someone` or `admin remove <user ID>` | Removes an admin. The bot's owner can't be removed. |
+| `admin backup` | Saves a backup of the database on the server (see [backups](server.md#backups)). |
+| `admin email you@example.com` | Where backup reminders are emailed; `admin email test` sends a test, `admin email off` stops them. |
 | `admin channel <channel ID>` | Sets the Discord channel where public arena bots and politician trade disclosures are posted. Without an ID, it shows the current channel. |
 | `/admin movedb folder:D:\StrojankaData` or `admin movedb D:\StrojankaData` | Moves the database to another folder or drive **while the bot keeps running**. The bot copies the database, checks the copy, switches to it, deletes the old file and updates the settings file. If anything goes wrong, nothing changes. |
 

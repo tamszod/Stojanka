@@ -18,6 +18,12 @@ struct Config {
     std::string installed_version;
     std::string screener_symbols;  // comma-separated stocks for `suggest`; empty = built-in list
     int low_disk_warning_mb = 1024; // admins are warned when the database drive has less free space
+    std::string backup_folder = "backups";  // where Backup writes .strojanka_backup files (relative = next to the config)
+    // Backup reminders by email (every 3 weeks without a backup, then every 2 days). Empty = no email.
+    std::string backup_email;
+    std::string smtp_server;    // e.g. "smtps://smtp.gmail.com:465"; empty = guessed from the address
+    std::string smtp_user;      // empty = backup_email
+    std::string smtp_password;  // for Gmail: an app password
 };
 
 std::optional<Config> load_config(const std::string& path, std::string* error);

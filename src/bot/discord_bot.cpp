@@ -152,6 +152,10 @@ void DiscordBot::register_commands() {
 
     cmds.emplace_back("portfolio", "What you hold now: shares, average cost, value, weight and profit", app);
 
+    dpp::slashcommand market("market", "Stock exchanges: ticker ending, opening hours, open or closed now", app);
+    market.add_option(dpp::command_option(dpp::co_string, "market", "Only this one, for example London or .DE", false));
+    cmds.push_back(market);
+
     dpp::slashcommand history("history", "Every buy and sell you recorded, with the profit of each sale", app);
     history.add_option(stock_option(false));
     cmds.push_back(history);
@@ -258,7 +262,7 @@ void DiscordBot::on_command(const dpp::slashcommand_t& event) {
         return std::holds_alternative<std::string>(v) ? std::get<std::string>(v) : std::string();
     };
     // `side` (suggest) and `bot` (arena) travel in the stock slot.
-    const std::string stock = name == "suggest" ? param("side") : name == "arena" ? param("bot") : param("stock");
+    const std::string stock = name == "suggest" ? param("side") : name == "arena" ? param("bot") : name == "market" ? param("market") : param("stock");
     // `name` (politicians) and `politician` (monitor/remove) travel in the same slot.
     const std::string politician = name == "politicians" ? param("name") : param("politician");
     const std::string shares = param("shares");
@@ -310,6 +314,7 @@ CommandReply DiscordBot::dispatch(const std::string& name, const std::string& us
     if (name == "status") return commands_.status(user);
     if (name == "profit") return commands_.profit(user, stock);
     if (name == "portfolio") return commands_.portfolio(user);
+    if (name == "market") return commands_.market(user, stock);
     if (name == "history") return commands_.history(user, stock);
     if (name == "monitor" || name == "remove") {
         if (!stock.empty() && !politician.empty()) return {false, "Give either a stock or a politician, not both."};

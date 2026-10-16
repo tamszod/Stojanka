@@ -163,16 +163,24 @@
     <div class="group">
       <label class="field">Database</label>
       <div class="radio">
-        <label id="db-new-l"><input type="radio" name="db" id="db-new" checked> Create a new database</label>
-        <label id="db-old-l"><input type="radio" name="db" id="db-old"> Use an existing one</label>
+        <label id="db-new-l"><input type="radio" name="db" id="db-new" checked> New database</label>
+        <label id="db-old-l"><input type="radio" name="db" id="db-old"> Existing file</label>
+        <label id="db-restore-l"><input type="radio" name="db" id="db-restore"> Restore a backup</label>
       </div>
       <div class="row"><input type="text" id="db-path" spellcheck="false"><button id="db-browse">Browse…</button></div>
       <div class="hint" id="db-hint"></div>
     </div>
-    <div class="group" style="max-width:260px">
-      <label class="field" for="poll">Check prices every</label>
-      <select id="poll"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
+    <div class="group row" style="gap:14px; align-items:flex-end">
+      <div style="flex:0 0 160px">
+        <label class="field" for="poll">Check prices every</label>
+        <select id="poll"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
+      </div>
+      <div style="flex:1">
+        <label class="field" for="mail">Backup reminders by email (optional)</label>
+        <div class="row"><input type="text" id="mail" spellcheck="false" placeholder="you@gmail.com"><input type="password" id="mail-pw" autocomplete="off" placeholder="App password"></div>
+      </div>
     </div>
+    <div class="hint" id="mail-hint" style="margin-top:-10px">After 3 weeks without a backup, then every 2 days. Gmail needs an app password; for other mail set <kbd>smtp_server</kbd> in strojanka.conf.</div>
   </section>
 
   <!-- UNINSTALL -->
@@ -308,6 +316,7 @@ function prepareSettings() {
     $('db-old').checked = x.database_exists; $('db-new').checked = !x.database_exists;
     $('db-path').value = x.database_path || defaultDb();
     $('poll').value = String(x.poll || 15);
+    if (x.backup_email) $('mail').value = x.backup_email;
   } else if (!$('db-path').value || $('db-new').checked) {
     $('db-path').value = defaultDb();
   }
@@ -315,10 +324,11 @@ function prepareSettings() {
 }
 
 function syncDb() {
-  const old = $('db-old').checked;
-  $('db-new-l').classList.toggle('sel', !old); $('db-old-l').classList.toggle('sel', old);
-  $('db-hint').textContent = old ? 'Your watch lists and trades from that file will be used. Older databases are upgraded automatically, with a backup.' :
-                                   'A new, empty database file will be created here.';
+  const old = $('db-old').checked, restore = $('db-restore').checked;
+  $('db-new-l').classList.toggle('sel', !old && !restore); $('db-old-l').classList.toggle('sel', old); $('db-restore-l').classList.toggle('sel', restore);
+  $('db-hint').textContent = restore ? 'Choose a .strojanka_backup file; it becomes the database (one already there is kept beside it).'
+                           : old ? 'Your watch lists and trades from that file will be used. Older databases are upgraded automatically, with a backup.'
+                           : 'A new, empty database file will be created here.';
 }
 
 function checkToken() {
@@ -365,7 +375,10 @@ async function run() {
     dir: $('dir').value.trim(),
     keep_settings: act === 'update' || act === 'repair' || act === 'revert',
     token: $('token').value.trim(),
-    database_path: $('db-path').value.trim(),
+    database_path: $('db-restore').checked ? defaultDb() : $('db-path').value.trim(),
+    restore_backup: $('db-restore').checked ? $('db-path').value.trim() : '',
+    backup_email: $('mail').value.trim(),
+    smtp_password: $('mail-pw').value,
     poll_minutes: parseInt($('poll').value, 10),
     start_menu_shortcut: $('sc-start').checked,
     desktop_shortcut: $('sc-desk').checked,
@@ -388,6 +401,10 @@ $('b-next').onclick = async () => {
   if (state.page === 'settings') {
     if (!checkToken()) { $('token').focus(); if (!$('token').value.trim()) { $('token-hint').className = 'hint bad'; $('token-hint').textContent = 'Paste your bot token to continue.'; } return; }
     if ($('db-old').checked && !$('db-path').value.trim()) { $('db-hint').textContent = 'Choose the database file.'; return; }
+    if ($('db-restore').checked && !/\.strojanka_backup$/i.test($('db-path').value.trim())) { $('db-hint').className = 'hint bad'; $('db-hint').textContent = 'Choose a .strojanka_backup file (Browse…).'; return; }
+    $('db-hint').className = 'hint';
+    const mail = $('mail').value.trim();
+    if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { $('mail-hint').className = 'hint bad'; $('mail-hint').textContent = 'That doesn\'t look like an email address.'; return; }
     return run();
   }
   if (state.page === 'uninstall') return run();
@@ -401,12 +418,18 @@ $('b-cancel').onclick = () => window.closeWindow();
 $('b-folder').onclick = () => window.openPath($('dir').value.trim());
 $('dir-browse').onclick = async () => { const p = await window.pickFolder($('dir').value); if (p) { $('dir').value = p; inspect(); } };
 $('db-browse').onclick = async () => {
-  const p = $('db-old').checked ? await window.pickFile($('db-path').value) : await window.pickFolder($('dir').value);
+  const restore = $('db-restore').checked;
+  const p = restore ? await window.pickFile($('db-path').value, 'backup')
+          : $('db-old').checked ? await window.pickFile($('db-path').value) : await window.pickFolder($('dir').value);
   if (!p) return;
-  if ($('db-old').checked) $('db-path').value = p;
+  if ($('db-old').checked || restore) $('db-path').value = p;
   else $('db-path').value = p.replace(/[\\/]+$/, '') + (state.info.platform === 'windows' ? '\\' : '/') + 'strojanka.db';
 };
-$('db-new').onchange = $('db-old').onchange = () => { if ($('db-new').checked) $('db-path').value = defaultDb(); syncDb(); };
+$('db-new').onchange = $('db-old').onchange = $('db-restore').onchange = () => {
+  if ($('db-new').checked) $('db-path').value = defaultDb();
+  if ($('db-restore').checked && !/\.strojanka_backup$/i.test($('db-path').value)) $('db-path').value = '';
+  syncDb();
+};
 $('token').oninput = checkToken;
 $('token-show').onclick = () => { const t = $('token'); t.type = t.type === 'password' ? 'text' : 'password'; $('token-show').textContent = t.type === 'password' ? 'Show' : 'Hide'; };
 let inspectTimer = 0;

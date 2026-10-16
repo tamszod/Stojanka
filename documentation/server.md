@@ -16,6 +16,7 @@ as soon as the window opens, and stops when you close it.
   runs low), and when prices were last checked.
 - **Watched stocks** (Ctrl+1): every stock any user watches, with its company name under the
   ticker (hover for the full name), price, trend, number of watchers and the last alert.
+- **Markets** (Ctrl+3): stock exchanges, their hours and whether they're open. See [Markets](#markets).
 - **Arena** (Ctrl+2): every trading bot with its stage (training, proving, public), its $1,000
   portfolio's value, its return and its lead or lag compared with Atlas, its trades, and its test
   on old prices. Click a bot for its details. See [the arena guide](arena.md).
@@ -42,6 +43,8 @@ without being a Discord admin.
 | `arena Diana` | One bot in detail |
 | `arena run` | Trade and re-judge the bots right now, instead of waiting for the hourly pass |
 | `arena channel <channel ID>` | The Discord channel where public bots report |
+| `backup` | Save the database as a `.strojanka_backup` file now (same as the **Backup** button) |
+| `market`, `market London` | Stock exchanges: ending, hours, open or closed (same as in Discord) |
 | `politicians`, `politicians Pelosi` | Recent US Congress stock trades, everyone's or one politician's |
 | `politicians run` | Check for new House and Senate filings right now, instead of waiting for the daily pass |
 | `politicians channel <channel ID>` | Same shared public channel as `arena channel` |
@@ -49,6 +52,29 @@ without being a Discord admin.
 | `admin movedb <folder>` | Move the database to another folder or drive while running |
 | `loglevel debug\|info\|warn\|error` | How much the console shows (until the next restart) |
 | `version`, `clear` | Version number; empty the console |
+
+## Backups
+
+Press **Backup** in the top bar (or type `backup`) to save the whole database as one file,
+`strojanka-<date>.strojanka_backup`, in the `backups` folder of the install folder. Set
+`backup_folder` in the settings to save them elsewhere, ideally on another drive or in a cloud
+folder. The **Database** card shows when the last backup was made.
+
+- **Reminders:** after 3 weeks without a backup, admins get a Discord message, and an email if an
+  address is set; then again every 2 days until you make one. The setup asks for the address; later
+  use `admin email you@example.com` and put the mailbox's password in `smtp_password` in the
+  settings (for Gmail an [app password](https://myaccount.google.com/apppasswords), because your normal
+  password won't work). `admin email test` or `strojanka --test-email` checks that mail arrives. Gmail,
+  Outlook/Hotmail, Yahoo and iCloud are set up automatically; for other mail set `smtp_server`, for
+  example `smtps://smtp.example.com:465`.
+- **Restoring:** run the setup, choose **Change settings** (or a new install), and under
+  **Database** pick **Restore a backup**. A database already in that place is kept beside it.
+
+## Markets
+
+The **Markets** tab (Ctrl+3) lists every exchange with its ticker ending, its hours in this
+computer's time and whether it is open; markets with watched stocks are marked. Prices of a stock
+are only checked while its market is open (plus once just after the close).
 
 ## Running without a window
 

@@ -72,6 +72,7 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
                         {"database_path", x.database_path},
                         {"database_exists", x.database_exists},
                         {"poll", x.config.poll_interval_minutes},
+                        {"backup_email", x.config.backup_email},
                         {"suggested", x.suggested},
                         {"start_menu", x.start_menu_shortcut},
                         {"desktop", x.desktop_shortcut},
@@ -82,7 +83,9 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
         });
 
         w.bind("pickFolder", [&](const std::string& req) { return json(os::pick_folder(window, str_arg(req, 0))).dump(); });
-        w.bind("pickFile", [&](const std::string& req) { return json(os::pick_file(window, str_arg(req, 0))).dump(); });
+        w.bind("pickFile", [&](const std::string& req) {
+            return json(os::pick_file(window, str_arg(req, 0), str_arg(req, 1) == "backup")).dump();
+        });
         w.bind("openPath", [&](const std::string& req) { return json(os::open_path(str_arg(req, 0))).dump(); });
 
         w.bind("closeWindow", [&](const std::string&) {
@@ -99,6 +102,9 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
             request.keep_settings = r.value("keep_settings", false);
             request.token = r.value("token", std::string());
             request.database_path = r.value("database_path", std::string());
+            request.restore_backup = r.value("restore_backup", std::string());
+            request.backup_email = r.value("backup_email", std::string());
+            request.smtp_password = r.value("smtp_password", std::string());
             request.poll_minutes = r.value("poll_minutes", 15);
             request.start_menu_shortcut = r.value("start_menu_shortcut", true);
             request.desktop_shortcut = r.value("desktop_shortcut", false);

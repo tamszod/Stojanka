@@ -3,9 +3,13 @@
 All notable changes to Strojanka are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 
-## [0.1.2] - Unreleased
+## [0.2.0] - 2026-10-16
 
 ### Added
+- **Backups**: a Backup button in the server window (also `backup` in its console, `admin backup` in Discord and `strojanka --backup`) saves the database as a checked `.strojanka_backup` file in `backup_folder` (default: `backups` in the install folder). The setup can start from one: *Restore a backup* under Database (`--restore <file>` in text mode); a database already there is kept beside it.
+- **Backup reminders**: after 3 weeks without a backup, admins get a Discord message and, if an address is set, an email; then again every 2 days until a backup is made. The setup asks for the address and its app password (Gmail); `admin email <address>|test|off` changes it later and `strojanka --test-email` checks the mail settings. Mail goes through the user's own mailbox (SMTP over TLS), so there is no cost. The admin panel and the server window show when the last backup was made.
+- **Markets**: `/market` lists 32 stock exchanges with the ticker ending to use there (`.L`, `.DE`, `.BD`...), today's or the next trading hours in this computer's time, and whether each is open now; `/market name:London` for one. The admin panel shows the markets of watched stocks, and the server window has a Markets tab. Hours follow each exchange's regular session with daylight saving time (US, EU, Sydney) and lunch breaks; public holidays aren't included.
+- Prices of a watched stock are no longer fetched while its market is closed: one check after the close gets the final prices, then nothing until it opens (the console's `check` still checks everything).
 - **Revert update**: every update keeps the version it replaces for 3 days (`previous` folder in the install folder), and the setup offers *Revert update* during that time, also through Settings > Apps > Strojanka > Modify, or `--revert` in text mode. Settings, watch lists and trades stay; if the update upgraded the database, the copy saved just before it is put back and the newer one is kept beside it. The copy is deleted after the 3 days.
 - Politician trades from the **US House of Representatives**, read from the House Clerk's official site: a yearly list of filings and each trade report as a PDF, read by a small built-in PDF text reader (including the ~15% of reports that are RC4-"encrypted" with an empty password). The first live check read 74 filings with 664 trades from the last 60 days; only scanned paper filings are skipped. `/politicians` lists the newest filings first with owner, amount, trade and filing dates.
 

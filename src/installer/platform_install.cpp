@@ -65,7 +65,7 @@ void make_link(const std::wstring& lnk, const std::wstring& target, const std::w
     link->Release();
 }
 
-std::string pick(void* owner, const std::string& initial, bool folder) {
+std::string pick(void* owner, const std::string& initial, bool folder, bool backup = false) {
     ComScope com;
     IFileOpenDialog* dlg = nullptr;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) return {};
@@ -73,8 +73,9 @@ std::string pick(void* owner, const std::string& initial, bool folder) {
     dlg->GetOptions(&opts);
     dlg->SetOptions(opts | FOS_FORCEFILESYSTEM | (folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST));
     if (!folder) {
-        const COMDLG_FILTERSPEC filters[] = {{L"Strojanka database (*.db)", L"*.db"}, {L"All files", L"*.*"}};
-        dlg->SetFileTypes(2, filters);
+        const COMDLG_FILTERSPEC db_filters[] = {{L"Strojanka database (*.db)", L"*.db"}, {L"All files", L"*.*"}};
+        const COMDLG_FILTERSPEC backup_filters[] = {{L"Strojanka backup (*.strojanka_backup)", L"*.strojanka_backup"}, {L"All files", L"*.*"}};
+        dlg->SetFileTypes(2, backup ? backup_filters : db_filters);
     }
     fs::path start = utf8_path(initial);
     std::error_code ec;
@@ -168,7 +169,7 @@ bool open_path(const std::string& path) {
 }
 
 std::string pick_folder(void* owner, const std::string& initial) { return pick(owner, initial, true); }
-std::string pick_file(void* owner, const std::string& initial) { return pick(owner, initial, false); }
+std::string pick_file(void* owner, const std::string& initial, bool backup) { return pick(owner, initial, false, backup); }
 
 void create_shortcuts(const std::string& install_dir, bool start_menu, bool desktop) {
     ComScope com;
@@ -345,7 +346,7 @@ int run_capture(const std::string& exe, const std::vector<std::string>& args, st
 bool open_path(const std::string& path) { return std::system(("open " + shell_quote(path)).c_str()) == 0; }
 
 std::string pick_folder(void*, const std::string& initial) { return apple_pick("folder", initial); }
-std::string pick_file(void*, const std::string& initial) {
+std::string pick_file(void*, const std::string& initial, bool) {
     return apple_pick("file", fs::path(initial).parent_path().string());
 }
 

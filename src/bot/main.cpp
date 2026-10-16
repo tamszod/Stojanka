@@ -21,6 +21,7 @@
 #include "core/analysis/walk_forward.h"
 #include "core/commands.h"
 #include "core/database.h"
+#include "core/email.h"
 #include "core/log.h"
 #include "core/market/yahoo_provider.h"
 #include "core/messages.h"
@@ -46,6 +47,8 @@ void print_usage() {
               << "  --arena            run the trading-bot arena once and print every bot\n"
               << "  --politicians [name]  check for new US House and Senate stock trade disclosures and print them\n"
               << "  --move-db <folder> move the database to another folder or drive (bot must be stopped)\n"
+              << "  --backup           save the database as a .strojanka_backup file in backup_folder\n"
+              << "  --test-email       send a test backup-reminder email with the mail settings\n"
               << "  --suggest [buy|sell] screen the stock list now and print the most predictable stocks\n"
               << "  --backtest <SYMBOL> [SYMBOL...]\n"
               << "                     measure out-of-sample accuracy on 10 years of history\n"
@@ -122,6 +125,23 @@ int run_analyze(const Config& config, const std::string& config_path, bool have_
     const CommandReply reply = commands.report("cli", symbol);  // same text as /report, incl. "did you mean"
     (reply.ok ? std::cout : std::cerr) << reply.text << "\n";
     return reply.ok ? 0 : 1;
+}
+
+// Saves a .strojanka_backup of the configured database (works while the bot runs, too).
+int run_backup(const Config& config, const std::string& config_path) {
+    Database db(resolve_config_path(config_path, config.database_path));
+    migrate_database(db, true);
+    Repository repo(db);
+    YahooProvider provider;
+    MonitorService monitor(repo, provider, config);
+    AdminService admin(db, repo, monitor, config, config_path);
+    const BackupResult b = admin.create_backup();
+    if (!b.ok) {
+        std::cerr << "Backup failed: " << b.error << "\n";
+        return 1;
+    }
+    std::cout << "Backup saved: " << b.path << " (" << format_bytes(b.bytes) << ")\n";
+    return 0;
 }
 
 // Checks the House and Senate disclosure sites once and prints the latest trades.
@@ -245,6 +265,8 @@ int main(int argc, char** argv) {
     bool politicians_mode = false;
     bool suggest = false;
     bool migrate = false;
+    bool backup = false;
+    bool test_email = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--config" && i + 1 < argc) config_path = argv[++i];
@@ -253,6 +275,8 @@ int main(int argc, char** argv) {
         else if (arg == "--news" && i + 1 < argc) news_symbol = argv[++i];
         else if (arg == "--move-db" && i + 1 < argc) move_db_folder = argv[++i];
         else if (arg == "--arena") arena_mode = true;
+        else if (arg == "--backup") backup = true;
+        else if (arg == "--test-email") test_email = true;
         else if (arg == "--politicians") {
             politicians_filter = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
             politicians_mode = true;
@@ -292,7 +316,7 @@ int main(int argc, char** argv) {
 
     log_set_level(parse_log_level(config.log_level));
     if (loaded && analyze_symbol.empty() && news_symbol.empty() && move_db_folder.empty() && !suggest && !arena_mode &&
-        !politicians_mode && !migrate &&
+        !politicians_mode && !migrate && !backup && !test_email &&
         !config.log_file.empty()) {
         log_set_file(resolve_config_path(config_path, config.log_file));
     }
@@ -300,6 +324,16 @@ int main(int argc, char** argv) {
     try {
         if (migrate) return run_migrate(config, config_path);
         if (!move_db_folder.empty()) return run_move_db(config, config_path, move_db_folder);
+        if (backup) return run_backup(config, config_path);
+        if (test_email) {
+            std::string mail_error;
+            if (!send_email(config, "Strojanka test message", "This is a test from Strojanka's backup reminders.", &mail_error)) {
+                std::cerr << "Could not send: " << mail_error << "\n";
+                return 1;
+            }
+            std::cout << "Test email sent to " << config.backup_email << ".\n";
+            return 0;
+        }
         if (!analyze_symbol.empty()) return run_analyze(config, config_path, loaded.has_value(), analyze_symbol);
         if (!news_symbol.empty()) return run_news(config, config_path, loaded.has_value(), news_symbol);
         if (arena_mode) return run_arena(config, config_path, loaded.has_value());

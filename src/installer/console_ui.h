@@ -16,6 +16,9 @@ struct ConsoleOptions {
     bool remove_data = false;  // --remove-data
     int autostart = -1;        // --autostart (1) / --no-autostart (0); -1 = keep what is set (new install: on)
     bool revert = false;       // --revert: go back to the version the last update replaced
+    std::string restore;       // --restore <file.strojanka_backup>
+    std::string email;         // --email <address> for backup reminders
+    std::string email_password;  // --email-password <app password>
 };
 
 // Text-mode installer: used with --console / --yes, and when no window can be shown.

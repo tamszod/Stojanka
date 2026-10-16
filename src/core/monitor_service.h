@@ -78,8 +78,9 @@ public:
     void start();
     void stop();
 
-    // Refreshes every watched symbol (deduplicated across users) in parallel.
-    void run_cycle();
+    // Refreshes every watched symbol (deduplicated across users) in parallel. Stocks whose market is
+    // closed and whose closing prices are already in are skipped, unless `force`.
+    void run_cycle(bool force = false);
 
     // Fetches prices, resolves old calls, re-learns parameters when due, analyses the latest
     // bar and (if emit_signals) sends PEAK/SUPPORT alerts. Safe to call from any thread.

@@ -20,7 +20,7 @@ bool open_path(const std::string& path);
 
 // Native pickers. Return "" when cancelled. `owner` is the native window handle or nullptr.
 std::string pick_folder(void* owner, const std::string& initial);
-std::string pick_file(void* owner, const std::string& initial);
+std::string pick_file(void* owner, const std::string& initial, bool backup = false);  // backup: .strojanka_backup files
 
 // Windows Start menu / desktop shortcuts and the "Apps & features" entry.
 void create_shortcuts(const std::string& install_dir, bool start_menu, bool desktop);

@@ -389,6 +389,16 @@ Result execute(const Request& req, const std::string& container, const ProgressF
         const std::string db = trim(req.database_path).empty() ? path_utf8(dir / "data" / "strojanka.db") : trim(req.database_path);
         config.database_path = path_utf8(fs::absolute(utf8_path(db)));
         config.poll_interval_minutes = req.poll_minutes > 0 ? req.poll_minutes : 15;
+        config.backup_email = trim(req.backup_email);
+        config.smtp_password = req.smtp_password;
+    }
+    if (!trim(req.restore_backup).empty()) {
+        // A backup is a plain SQLite database (core/database.cpp backup_to): check it is one before using it.
+        std::ifstream f(utf8_path(trim(req.restore_backup)), std::ios::binary);
+        char header[16] = {};
+        if (!f.read(header, 16) || std::string(header, 15) != "SQLite format 3") {
+            return fail("`" + trim(req.restore_backup) + "` is not a Strojanka backup (or it is damaged).");
+        }
     }
 
     // Program files: only write what is missing or different, so Repair shows what it fixed.
@@ -423,6 +433,32 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     }
     write_launcher(dir);
 
+    if (!trim(req.restore_backup).empty()) {
+        progress(0.76, "Restoring the database from the backup");
+        const fs::path db = utf8_path(config.database_path);
+        fs::create_directories(db.parent_path(), ec);
+        if (fs::exists(db, ec)) {
+            // Never overwrite a database: keep it beside the restored one.
+            std::string stamp = utc_now_iso();
+            for (char& c : stamp) {
+                if (c == ':') c = '-';
+            }
+            fs::path aside = db;
+            aside += ".before-restore-" + stamp;
+            fs::rename(db, aside, ec);
+            for (const char* side : {"-wal", "-shm"}) {
+                fs::path from = db, to = aside;
+                from += side;
+                to += side;
+                if (fs::exists(from, ec)) fs::rename(from, to, ec);
+            }
+            if (ec) return fail("Could not move the existing database aside (" + ec.message() + ").");
+            r.note = "The database that was there is kept as " + path_utf8(aside) + ".";
+        }
+        fs::copy_file(utf8_path(trim(req.restore_backup)), db, fs::copy_options::none, ec);
+        if (ec) return fail("Could not restore the backup (" + ec.message() + ").");
+    }
+
     progress(0.78, "Saving settings");
     config.installed_version = STROJANKA_VERSION;
     if (!save_config(config, path_utf8(config_path), &error)) return fail(error);
@@ -453,7 +489,7 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     r.version = STROJANKA_VERSION;
     r.launcher = path_utf8(dir / kServerApp);
     if (keeping_backup) {
-        r.note = "Version " + existing.version + " is kept until " + backup.expires_at.substr(0, 10) +
+        r.note += std::string(r.note.empty() ? "" : " ") + "Version " + existing.version + " is kept until " + backup.expires_at.substr(0, 10) +
                  ": run this setup again (or Settings > Apps > Strojanka > Modify) and choose Revert update to go back.";
     }
     return r;

@@ -80,6 +80,8 @@ add_library(strojanka_core STATIC
   src/core/politicians/house_clerk.cpp
   src/core/politicians/politician_service.cpp
   src/core/archive.cpp
+  src/core/markets.cpp
+  src/core/email.cpp
   src/core/pdf_text.cpp
   src/core/pdf_crypto.cpp
   src/core/http.cpp
