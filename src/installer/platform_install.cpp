@@ -2,7 +2,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cwctype>
 #include <filesystem>
+#include <iterator>
 
 #include "common/utf8_path.h"
 
@@ -25,6 +27,9 @@ namespace strojanka::installer::os {
 namespace {
 
 const wchar_t* kUninstallKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Strojanka";
+const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const wchar_t* kRunValue = L"Strojanka";
+const wchar_t* kServerTitle = L"Strojanka Server";  // set by src/server/main.cpp
 
 std::wstring wide(const std::string& s) { return utf8_path(s).wstring(); }
 
@@ -200,6 +205,73 @@ void register_app(const std::string& install_dir, const std::string& version, un
 
 void unregister_app() { RegDeleteKeyW(HKEY_CURRENT_USER, kUninstallKey); }
 
+Integration current_integration() {
+    ComScope com;
+    Integration i;
+    std::error_code ec;
+    i.start_menu = fs::exists(fs::path(known_folder(FOLDERID_Programs) + L"\\Strojanka.lnk"), ec);
+    i.desktop = fs::exists(fs::path(known_folder(FOLDERID_Desktop) + L"\\Strojanka.lnk"), ec);
+    i.autostart = RegGetValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, RRF_RT_REG_SZ, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    return i;
+}
+
+void set_autostart(const std::string& install_dir, bool enabled) {
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+    if (enabled) {
+        const fs::path exe = utf8_path(install_dir) / "StrojankaServer.exe";
+        set_value(key, kRunValue, L"\"" + exe.wstring() + L"\" --autostart");
+    } else {
+        RegDeleteValueW(key, kRunValue);
+    }
+    RegCloseKey(key);
+}
+
+namespace {
+
+struct ServerWindows {
+    std::wstring exe;  // lower-case full path of the StrojankaServer.exe to match
+    std::vector<HWND> found;
+};
+
+std::wstring lower(std::wstring s) {
+    for (auto& c : s) c = static_cast<wchar_t>(towlower(c));
+    return s;
+}
+
+BOOL CALLBACK collect_server_window(HWND hwnd, LPARAM param) {
+    auto* sw = reinterpret_cast<ServerWindows*>(param);
+    wchar_t title[64] = {};
+    GetWindowTextW(hwnd, title, 64);
+    if (std::wstring(title) != kServerTitle) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return TRUE;
+    wchar_t path[MAX_PATH * 4] = {};
+    DWORD size = static_cast<DWORD>(std::size(path));
+    if (QueryFullProcessImageNameW(process, 0, path, &size) && lower(path) == sw->exe) sw->found.push_back(hwnd);
+    CloseHandle(process);
+    return TRUE;
+}
+
+}  // namespace
+
+bool close_running_server(const std::string& install_dir, int timeout_seconds) {
+    const fs::path exe = utf8_path(install_dir) / "StrojankaServer.exe";
+    if (!file_in_use(path_utf8(exe))) return true;
+    ServerWindows sw;
+    sw.exe = lower(fs::absolute(exe).wstring());
+    EnumWindows(collect_server_window, reinterpret_cast<LPARAM>(&sw));
+    if (sw.found.empty()) return false;  // running, but not as a window we can ask
+    for (HWND h : sw.found) PostMessageW(h, WM_CLOSE, 0, 0);
+    for (int waited = 0; waited < timeout_seconds * 4; ++waited) {
+        if (!file_in_use(path_utf8(exe))) return true;
+        Sleep(250);
+    }
+    return !file_in_use(path_utf8(exe));
+}
+
 void delete_after_exit(const std::string& path) {
     const fs::path p = utf8_path(path);
     std::wstring cmd = L"cmd.exe /c ping 127.0.0.1 -n 4 >nul & del /f /q \"" + p.wstring() + L"\" & rmdir \"" +
@@ -281,6 +353,9 @@ void create_shortcuts(const std::string&, bool, bool) {}
 void remove_shortcuts() {}
 void register_app(const std::string&, const std::string&, unsigned long) {}
 void unregister_app() {}
+Integration current_integration() { return {}; }
+void set_autostart(const std::string&, bool) {}
+bool close_running_server(const std::string&, int) { return false; }
 void delete_after_exit(const std::string&) {}
 
 #endif

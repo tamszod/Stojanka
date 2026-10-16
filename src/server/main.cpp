@@ -84,14 +84,59 @@ struct LogFeed {
     }
 };
 
+constexpr const char* kWindowTitle = "Strojanka Server";  // the installer finds the window by it
+
+#if defined(_WIN32)
+// Opening the shortcut while Strojanka Server already runs (for example minimized since sign-in)
+// shows that window instead of starting a second copy, which the instance lock would refuse.
+bool activate_running_copy() {
+    struct Search {
+        std::wstring exe;
+        HWND found = nullptr;
+    } search;
+    wchar_t self[MAX_PATH * 4] = {};
+    GetModuleFileNameW(nullptr, self, MAX_PATH * 4);
+    search.exe = self;
+    EnumWindows(
+        [](HWND hwnd, LPARAM param) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(param);
+            wchar_t title[64] = {};
+            GetWindowTextW(hwnd, title, 64);
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid == GetCurrentProcessId() || utf8_path(kWindowTitle).wstring() != title) return TRUE;
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (!process) return TRUE;
+            wchar_t path[MAX_PATH * 4] = {};
+            DWORD size = MAX_PATH * 4;
+            const bool same = QueryFullProcessImageNameW(process, 0, path, &size) && _wcsicmp(path, s->exe.c_str()) == 0;
+            CloseHandle(process);
+            if (!same) return TRUE;
+            s->found = hwnd;
+            return FALSE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    if (!search.found) return false;
+    ShowWindow(search.found, IsIconic(search.found) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(search.found);
+    return true;
+}
+#else
+bool activate_running_copy() { return false; }
+#endif
+
 }  // namespace
 
 int main(int argc, char** argv) {
     install_crash_handler();
     std::string config_path;
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (std::string(argv[i]) == "--config") config_path = argv[i + 1];
+    bool autostart = false;  // started by Windows at sign-in: minimized, and wait for the network
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--config" && i + 1 < argc) config_path = argv[++i];
+        else if (a == "--autostart") autostart = true;
     }
+    if (activate_running_copy()) return 0;
     if (config_path.empty()) {
         fs::path dir = utf8_path(executable_dir());
         // macOS: the program sits in StrojankaServer.app/Contents/MacOS; the settings are next to the .app.
@@ -104,6 +149,7 @@ int main(int argc, char** argv) {
     log_set_listener([&feed](LogLevel level, const std::string& line) { feed.add(level, line); });
 
     BotHost host(config_path);
+    if (autostart) host.set_network_wait(std::chrono::minutes(3));
     std::shared_mutex host_mutex;   // unique: start/stop; shared: commands and status
     std::atomic<int> phase{0};      // 0 idle, 1 starting, 2 stopping
     std::mutex error_mutex;
@@ -127,20 +173,30 @@ int main(int argc, char** argv) {
         host.stop();
         phase = 0;
     };
+    // Queues a stop. A start still waiting for the network holds the lock on the same 1-thread
+    // pool, so tell it to give up first or the stop would wait minutes behind it.
+    auto request_stop = [&] {
+        host.abort_network_wait();
+        return lifecycle.submit(stop_bot);
+    };
     // The window itself has no Ctrl+C; this is for Windows shutting down, restarting or updating.
     SessionWatch watch([&](const std::string& reason, bool forced) {
         if (forced) {
             std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
             if (lock.owns_lock()) host.note_session_end(reason);
         }
-        lifecycle.submit(stop_bot).wait_for(SessionWatch::kSessionEndGrace);
+        request_stop().wait_for(SessionWatch::kSessionEndGrace);
     });
 
     try {
         webview::webview w(false, nullptr);
-        w.set_title("Strojanka Server");
+        w.set_title(kWindowTitle);
         w.set_size(1000, 640, WEBVIEW_HINT_MIN);
         w.set_size(1240, 780, WEBVIEW_HINT_NONE);
+#if defined(_WIN32)
+        // At sign-in: sit in the taskbar instead of popping up over whatever the user opens first.
+        if (autostart && w.window().ok()) ShowWindow(static_cast<HWND>(w.window().value()), SW_SHOWMINNOACTIVE);
+#endif
         ThreadPool commands(2);  // declared after `w`: finishes (and stops using it) before `w` is destroyed
 
         w.bind("serverInfo", [&](const std::string&) {
@@ -228,7 +284,7 @@ int main(int argc, char** argv) {
             return std::string("true");
         });
         w.bind("stopBot", [&](const std::string&) {
-            lifecycle.submit(stop_bot);
+            request_stop();
             return std::string("true");
         });
 
@@ -302,6 +358,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     log_set_listener({});
-    lifecycle.submit(stop_bot).wait();
+    request_stop().wait();
     return 0;
 }

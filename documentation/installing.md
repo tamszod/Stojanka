@@ -19,11 +19,15 @@ and guides you through four steps:
 
 1. **Welcome:** choose the install folder. The default is `%LOCALAPPDATA%\Programs\Strojanka` on
    Windows and `~/Applications/Strojanka` on a Mac. No administrator rights are needed.
+   On Windows, also choose under **On this computer**:
+   - **Start menu shortcut** and **Desktop shortcut**.
+   - **Start with Windows** (on by default): Strojanka Server opens minimized every time you sign
+     in, so alerts keep running after a restart, for example after a Windows update. It appears in
+     **Task Manager > Startup apps**, where you can also switch it off.
 2. **Settings:**
    - Paste the bot token from step 1. The window warns you if what you pasted doesn't look like a token, for example the Public Key.
    - Choose a new database, or an existing `strojanka.db`, for example one from another computer.
    - Pick how often prices are checked.
-   - On Windows, choose whether to add Start menu and desktop shortcuts.
 3. **Install:** a progress bar shows each step.
 4. **Finish:** tick **Start Strojanka now** to launch the bot straight away.
 
@@ -49,14 +53,20 @@ offers:
 | **Change settings** | Reinstalls with a new token, database or check interval. |
 | **Uninstall** | Removes the program, its shortcuts and its app-list entry. Your database and settings are kept unless you tick **Also delete my data**. Data stored outside the install folder is never deleted. |
 
-Close the bot's window before updating, repairing or uninstalling. If it is still running, the
-installer tells you instead of failing halfway.
+The **On this computer** choices are shown on this page too, set to what you have now, so an
+update keeps your shortcuts and **Start with Windows** unless you change them there.
+
+If Strojanka Server is running, the installer closes it for you first. The bot stops cleanly,
+which can take up to a minute while the AI model is training. Tick **Start Strojanka now** at the
+end to start it again. A copy running in a console window (`start_strojanka.bat`) can't be closed
+this way; close it yourself.
 
 ### Without the window (scripts and servers)
 
 ```
 StrojankaInstaller --yes --dir "D:\Strojanka" --token "YOUR_TOKEN"          # install
 StrojankaInstaller --yes --dir "D:\Strojanka"                                # update or repair, keeps settings
+StrojankaInstaller --yes --dir "D:\Strojanka" --autostart                    # ... and start with Windows (--no-autostart: don't)
 StrojankaInstaller --yes --dir "D:\Strojanka" --uninstall [--remove-data]    # uninstall
 StrojankaInstaller --console                                                 # text installer with questions
 ```
@@ -68,7 +78,10 @@ Run `StrojankaInstaller --help` for all options. On Windows, run these from `cmd
 
 Use the **Strojanka** Start menu shortcut. It opens the **Strojanka Server** window, with the
 bot's status, a dashboard, the live log and a command line ([details](server.md)). Keep it open;
-closing it stops the bot. Logs are also written to `strojanka.log`.
+closing it stops the bot. Logs are also written to `strojanka.log`. With **Start with Windows**
+it is already running, minimized in the taskbar, after you sign in; the shortcut then just shows
+that window. It starts when you *sign in*, not before: if Windows restarts on its own (an update
+at night), the bot runs again once someone signs in.
 
 For the trading-bot arena to post in your server, choose a channel once: send
 `admin channel <channel ID>` to the bot (see [the arena guide](arena.md#setting-it-up)).

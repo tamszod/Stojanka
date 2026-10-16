@@ -161,6 +161,16 @@ int run_console(const std::string& container, const ConsoleOptions& opt) {
         }
     }
 
+    // Shortcuts and start-up: keep what is set now (a new install gets the defaults).
+    req.start_menu_shortcut = existing.start_menu_shortcut;
+    req.desktop_shortcut = existing.desktop_shortcut;
+    req.autostart = opt.autostart >= 0 ? opt.autostart == 1 : existing.autostart;
+#if defined(_WIN32)
+    if (!opt.uninstall && !opt.unattended && opt.autostart < 0) {
+        req.autostart = ask_yes_no("Start Strojanka automatically when you sign in to Windows?", req.autostart);
+    }
+#endif
+
     if (!opt.unattended && !opt.uninstall && !ask_yes_no(std::string("\nStart: ") + action_name(req.action) + " in " + req.dir + "?", true)) {
         std::cout << "Cancelled.\n";
         return 1;

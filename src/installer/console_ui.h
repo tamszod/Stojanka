@@ -14,6 +14,7 @@ struct ConsoleOptions {
     bool keep_config = false;  // --keep-config
     bool uninstall = false;    // --uninstall
     bool remove_data = false;  // --remove-data
+    int autostart = -1;        // --autostart (1) / --no-autostart (0); -1 = keep what is set (new install: on)
 };
 
 // Text-mode installer: used with --console / --yes, and when no window can be shown.

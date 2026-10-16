@@ -34,6 +34,8 @@ void print_usage() {
               << "  --existing-db <file>    use (and upgrade) an existing database\n"
               << "  --poll <minutes>        how often stocks are checked (default 15)\n"
               << "  --keep-config           on update, keep the existing strojanka.conf\n"
+              << "  --autostart             start Strojanka Server (minimized) when you sign in to Windows\n"
+              << "  --no-autostart          don't; without either option the current choice is kept (new installs: on)\n"
               << "  --uninstall             remove Strojanka (add --remove-data to delete the database too)\n";
 }
 
@@ -86,6 +88,8 @@ int main(int argc, char** argv) {
         else if (a == "--console") console = true;
         else if (a == "--uninstall") opt.uninstall = true;
         else if (a == "--remove-data") opt.remove_data = true;
+        else if (a == "--autostart") opt.autostart = 1;
+        else if (a == "--no-autostart") opt.autostart = 0;
         else ok = false;
         if (!ok) {
             attach_console();

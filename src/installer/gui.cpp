@@ -71,7 +71,10 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
                         {"database_path", x.database_path},
                         {"database_exists", x.database_exists},
                         {"poll", x.config.poll_interval_minutes},
-                        {"suggested", x.suggested}}
+                        {"suggested", x.suggested},
+                        {"start_menu", x.start_menu_shortcut},
+                        {"desktop", x.desktop_shortcut},
+                        {"autostart", x.autostart}}
                 .dump();
         });
 
@@ -96,6 +99,7 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
             request.poll_minutes = r.value("poll_minutes", 15);
             request.start_menu_shortcut = r.value("start_menu_shortcut", true);
             request.desktop_shortcut = r.value("desktop_shortcut", false);
+            request.autostart = r.value("autostart", false);
             request.remove_data = r.value("remove_data", false);
             if (worker.joinable()) worker.join();
             worker = std::thread([&w, &busy, &exit_code, request, container] {

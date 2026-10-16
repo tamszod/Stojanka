@@ -79,6 +79,7 @@
   .radio label { flex: 1; display: flex; gap: 8px; align-items: center; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--card); }
   .radio label.sel { border-color: var(--accent); }
   .check { display: flex; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }
+  .checks { display: flex; flex-wrap: wrap; column-gap: 22px; }
   input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; }
   .pw { position: relative; flex: 1; display: flex; }
   .pw input { padding-right: 64px; }
@@ -135,6 +136,15 @@
       <div class="row"><input type="text" id="dir" spellcheck="false"><button id="dir-browse">Browse…</button></div>
       <div class="hint" id="dir-hint"></div>
     </div>
+    <div class="group" id="integration">
+      <label class="field">On this computer</label>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="sc-start" checked> Start menu shortcut</label>
+        <label class="check"><input type="checkbox" id="sc-desk"> Desktop shortcut</label>
+        <label class="check" title="Opens minimized when you sign in to Windows, so alerts keep running after a restart. Can also be turned off in Task Manager > Startup apps."><input type="checkbox" id="autostart" checked> Start with Windows</label>
+      </div>
+      <div class="hint" id="autostart-hint"><b>Start with Windows</b> opens Strojanka minimized when you sign in, so your alerts keep running after a restart, for example after a Windows update. You can turn it off later here or in Task Manager &gt; Startup apps.</div>
+    </div>
   </section>
 
   <!-- SETTINGS -->
@@ -155,16 +165,9 @@
       <div class="row"><input type="text" id="db-path" spellcheck="false"><button id="db-browse">Browse…</button></div>
       <div class="hint" id="db-hint"></div>
     </div>
-    <div class="group row" style="gap:18px">
-      <div style="flex:1">
-        <label class="field" for="poll">Check prices every</label>
-        <select id="poll"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
-      </div>
-      <div style="flex:1" id="shortcuts">
-        <label class="field">Shortcuts</label>
-        <label class="check"><input type="checkbox" id="sc-start" checked> Start menu</label>
-        <label class="check"><input type="checkbox" id="sc-desk"> Desktop</label>
-      </div>
+    <div class="group" style="max-width:260px">
+      <label class="field" for="poll">Check prices every</label>
+      <select id="poll"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select>
     </div>
   </section>
 
@@ -243,13 +246,23 @@ function nextLabel() {
 function selectAction(act) {
   state.action = act;
   document.querySelectorAll('#w-existing .card').forEach(c => c.classList.toggle('sel', c.dataset.act === act));
+  $('integration').hidden = state.info.platform !== 'windows' || act === 'uninstall';
   $('b-next').textContent = nextLabel();
+}
+
+// What is set up now (or, for a new install, the defaults), so an update keeps the user's choices.
+function showIntegration(x) {
+  $('sc-start').checked = x.start_menu;
+  $('sc-desk').checked = x.desktop;
+  $('autostart').checked = x.autostart;
+  $('autostart-hint').hidden = x.found;  // the Update/Repair cards leave no room for it
 }
 
 async function inspect() {
   const dir = $('dir').value.trim();
   const x = await window.inspectDir(dir);
   state.existing = x;
+  showIntegration(x);
   const v = state.info.version;
   $('w-existing').hidden = !x.found;
   if (!x.found) {
@@ -344,6 +357,7 @@ async function run() {
     poll_minutes: parseInt($('poll').value, 10),
     start_menu_shortcut: $('sc-start').checked,
     desktop_shortcut: $('sc-desk').checked,
+    autostart: $('autostart').checked,
     remove_data: $('rm-data').checked,
   };
   $('p-title').textContent = { update: 'Updating…', repair: 'Repairing…', uninstall: 'Uninstalling…' }[act] || 'Installing…';
@@ -391,7 +405,6 @@ document.addEventListener('keydown', e => { if (e.key === 'Enter' && !$('b-next'
 (async () => {
   state.info = await window.appInfo();
   $('ver').textContent = 'Setup · version ' + state.info.version;
-  $('shortcuts').hidden = state.info.platform !== 'windows';
   $('dir').value = state.info.dir;
   await inspect();
   if (state.info.start === 'uninstall' && state.existing.found) { selectAction('uninstall'); show('uninstall'); }

@@ -73,6 +73,10 @@ the gap and the first lines of the next start:
   crashed. Please open an issue and attach `strojanka.log`, plus `strojanka-crash.log` and
   `strojanka-crash.dmp` from the install folder if they exist.
 
+To have it start again by itself after Windows restarts, run the installer and tick **Start with
+Windows** (also offered when updating). It then opens minimized each time you sign in, and waits
+up to three minutes for the internet connection before connecting to Discord.
+
 Windows keeps its own record too. This PowerShell command lists restarts, shutdowns and
 Strojanka crashes from the last week (it only reads):
 

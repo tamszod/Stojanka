@@ -44,6 +44,25 @@ bool inside(const fs::path& child, const fs::path& parent) {
     return true;
 }
 
+// A running copy locks the program files. The window is asked to close (it stops the bot cleanly
+// first, which can take up to a minute while the AI model trains); a console copy can't be asked.
+std::string stop_running_copy(const fs::path& dir, const ProgressFn& progress) {
+    const bool bot_busy = os::file_in_use(path_utf8(dir / kBotExecutable));
+    const bool server_busy = os::file_in_use(path_utf8(dir / kServerApp));
+    if (!bot_busy && !server_busy) return {};
+    if (server_busy) {
+        progress(0.03, "Closing the running Strojanka Server (it stops the bot cleanly first)");
+        os::close_running_server(path_utf8(dir), 90);
+    }
+    if (os::file_in_use(path_utf8(dir / kServerApp))) {
+        return "Strojanka Server is still running from this folder. Close its window, then try again.";
+    }
+    if (os::file_in_use(path_utf8(dir / kBotExecutable))) {
+        return "Strojanka is running from this folder in a console window (start_strojanka). Close it, then try again.";
+    }
+    return {};
+}
+
 bool same_file(const fs::path& a, const fs::path& b) {
     std::error_code ec;
     return fs::exists(a) && fs::exists(b) && fs::equivalent(a, b, ec);
@@ -76,9 +95,9 @@ void prune_empty(const fs::path& dir) {
 Result uninstall(const Request& req, const std::string& container, const ProgressFn& progress) {
     Result r;
     const fs::path dir = fs::absolute(utf8_path(req.dir));
-    progress(0.05, "Checking that Strojanka is not running");
-    if (os::file_in_use(path_utf8(dir / kBotExecutable)) || os::file_in_use(path_utf8(dir / kServerApp))) {
-        r.error = "Strojanka is running. Close the Strojanka Server window (or the start_strojanka console) and try again.";
+    progress(0.02, "Checking that Strojanka is not running");
+    if (const std::string busy = stop_running_copy(dir, progress); !busy.empty()) {
+        r.error = busy;
         return r;
     }
     const ExistingInstall existing = inspect_install(req.dir);
@@ -95,6 +114,7 @@ Result uninstall(const Request& req, const std::string& container, const Progres
 
     progress(0.5, "Removing shortcuts");
     os::remove_shortcuts();
+    os::set_autostart(path_utf8(dir), false);
     os::unregister_app();
 
     if (req.remove_data) {
@@ -170,6 +190,10 @@ ExistingInstall inspect_install(const std::string& dir_text) {
     std::error_code ec;
     x.found = fs::exists(dir / kBotExecutable, ec) || fs::exists(config_path, ec);
     if (!x.found) return x;
+    const os::Integration now = os::current_integration();
+    x.start_menu_shortcut = now.start_menu;
+    x.desktop_shortcut = now.desktop;
+    x.autostart = now.autostart;
 
     if (auto c = load_config(path_utf8(config_path), nullptr)) {
         x.has_config = true;
@@ -204,10 +228,7 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) return fail("Cannot create " + path_utf8(dir) + ": " + ec.message());
-    if (os::file_in_use(path_utf8(bot)) || os::file_in_use(path_utf8(dir / kServerApp))) {
-        return fail("Strojanka is running from this folder. Close the Strojanka Server window (or the start_strojanka "
-                    "console), then try again.");
-    }
+    if (const std::string busy = stop_running_copy(dir, progress); !busy.empty()) return fail(busy);
 
     // Settings
     Config config;
@@ -262,6 +283,7 @@ Result execute(const Request& req, const std::string& container, const ProgressF
     }
     os::remove_shortcuts();
     os::create_shortcuts(path_utf8(dir), req.start_menu_shortcut, req.desktop_shortcut);
+    os::set_autostart(path_utf8(dir), req.autostart);
     os::register_app(path_utf8(dir), STROJANKA_VERSION, folder_size_kb(dir));
 
     progress(1.0, "Finished");

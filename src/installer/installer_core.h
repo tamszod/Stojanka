@@ -35,6 +35,10 @@ struct ExistingInstall {
     std::string database_path;    // absolute
     bool database_exists = false;
     std::string suggested;        // "install", "update", "repair" or "downgrade"
+    // Windows integration as it is now (for a new install: the defaults offered).
+    bool start_menu_shortcut = true;
+    bool desktop_shortcut = false;
+    bool autostart = true;
 };
 ExistingInstall inspect_install(const std::string& dir);
 
@@ -50,6 +54,7 @@ struct Request {
     int poll_minutes = 15;
     bool start_menu_shortcut = true;    // Windows
     bool desktop_shortcut = false;      // Windows
+    bool autostart = false;             // Windows: start Strojanka Server when the user signs in
     bool remove_data = false;           // Uninstall: also delete database, settings and logs
 };
 

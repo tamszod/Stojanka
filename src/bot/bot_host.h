@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -35,6 +37,11 @@ public:
     // and connects to Discord in the background. Returns false with a readable error.
     bool start(std::string* error);
     void stop();
+    // Started with Windows: the network may not be up yet, so keep trying to reach Discord for
+    // this long before connecting (0 = try once, the default).
+    void set_network_wait(std::chrono::seconds wait) { network_wait_ = wait; }
+    // Ends that wait early (start() then fails); safe from any thread, needs no lock.
+    void abort_network_wait() { abort_wait_ = true; }
     bool running() const { return bot_ != nullptr; }
     void wait();          // blocks until stop() or request_stop() is called from another thread
     void request_stop();  // wakes wait() without tearing anything down; the waiting thread then calls stop()
@@ -58,6 +65,8 @@ public:
 
 private:
     std::string config_path_;
+    std::chrono::seconds network_wait_{0};
+    std::atomic<bool> abort_wait_{false};
     Config config_;
     std::string started_at_;
     std::unique_ptr<InstanceLock> lock_;

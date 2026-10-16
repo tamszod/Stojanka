@@ -2,6 +2,8 @@
 
 #include <curl/curl.h>
 
+#include <thread>
+
 #include "bot/discord_bot.h"
 #include "bot/tls_trust.h"
 #include "common/crash_handler.h"
@@ -55,6 +57,7 @@ BotHost::~BotHost() { stop(); }
 
 bool BotHost::start(std::string* error) {
     if (running()) return true;
+    abort_wait_ = false;
     auto fail = [&](const std::string& message) {
         log_error(message);
         if (error) *error = message;
@@ -73,7 +76,20 @@ bool BotHost::start(std::string* error) {
     }
 
     if (config_.discord_token.empty()) return fail("discord_token is empty in " + config_path_ + ". Run the installer again or edit the file.");
-    const long token_status = check_discord_token(config_.discord_token);
+    long token_status = check_discord_token(config_.discord_token);
+    if (token_status == 0 && network_wait_.count() > 0) {
+        log_info("waiting for the network to reach Discord (up to " + std::to_string(network_wait_.count()) + " s)");
+        const auto deadline = std::chrono::steady_clock::now() + network_wait_;
+        auto next_try = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (token_status == 0 && std::chrono::steady_clock::now() < deadline) {
+            if (abort_wait_) return fail("Stopped while waiting for the network.");
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            if (std::chrono::steady_clock::now() < next_try) continue;
+            token_status = check_discord_token(config_.discord_token);
+            next_try = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        }
+        if (token_status != 0) log_info("the network is up");
+    }
     if (token_status == 401) {
         return fail("Discord rejected the bot token in " + config_path_ +
                     ". Copy a fresh token from the Discord developer portal (Bot -> Reset Token) into the file.");
@@ -124,7 +140,11 @@ bool BotHost::start(std::string* error) {
         std::lock_guard<std::mutex> lock(wait_mutex_);
         stop_requested_ = false;
     }
-    bot_->start();
+    try {
+        bot_->start();
+    } catch (const std::exception& e) {
+        return fail(std::string("Could not connect to Discord (") + e.what() + "). Check the internet connection, then press Try again.");
+    }
     return true;
 }
 
