@@ -231,8 +231,17 @@ async function refreshState() {
     $('c-meter').querySelector('div').style.width = (used * 100).toFixed(0) + '%';
     $('c-meter').className = 'meter' + (s.disk_free < s.disk_threshold ? ' crit' : s.disk_free < s.disk_threshold * 3 ? ' low' : '');
   }
-  $('c-cycle').textContent = ago(s.cycle_at);
-  $('c-cycle-sub').textContent = s.cycle_total ? `${s.cycle_refreshed}/${s.cycle_total} refreshed` + (s.cycle_failures ? ' · ⚠ failing' : '') : '';
+  if (s.cycle_all_closed) {
+    // Nothing to check: say why instead of a "last check" that keeps getting older.
+    $('c-cycle').textContent = 'Markets closed';
+    $('c-cycle-sub').textContent = `${s.cycle_next_market} opens ${s.cycle_next_open}`;
+    $('c-cycle-sub').title = `No price checks until then${s.cycle_at ? '; last check ' + ago(s.cycle_at) : ''}`;
+  } else {
+    $('c-cycle').textContent = ago(s.cycle_at);
+    $('c-cycle-sub').textContent = s.cycle_total ? `${s.cycle_refreshed}/${s.cycle_total} refreshed` +
+      (s.cycle_skipped ? ` · ${s.cycle_skipped} closed` : '') + (s.cycle_failures ? ' · ⚠ failing' : '') : '';
+    $('c-cycle-sub').title = s.cycle_skipped ? `${s.cycle_skipped} stock(s) aren't checked until their market opens (${s.cycle_next_market}: ${s.cycle_next_open})` : '';
+  }
 }
 
 async function refreshStocks() {

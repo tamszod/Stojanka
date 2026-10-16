@@ -251,6 +251,10 @@ int main(int argc, char** argv) {
                 {"cycle_refreshed", cycle.refreshed},
                 {"cycle_total", cycle.total},
                 {"cycle_failures", cycle.failed_cycles_in_a_row},
+                {"cycle_all_closed", cycle.all_closed},
+                {"cycle_skipped", cycle.skipped_closed},
+                {"cycle_next_open", cycle.next_open_at ? local_clock(cycle.next_open_at, true) : ""},
+                {"cycle_next_market", cycle.next_open_market},
                 {"last_backup_at", host.admin().last_backup_at()},
                 {"last_backup_path", repo.meta("last_backup_path")},
             };

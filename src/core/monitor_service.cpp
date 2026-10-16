@@ -54,13 +54,82 @@ void MonitorService::start() {
             } catch (...) {
                 log_error("monitor cycle failed with an unknown error");
             }
-            std::unique_lock<std::mutex> lock(loop_mutex_);
-            if (loop_cv_.wait_for(lock, std::chrono::minutes(config_.poll_interval_minutes), [this] { return stopping_; })) {
-                break;
-            }
+            if (!wait_for_next_cycle()) break;
         }
         log_info("monitor stopped");
     });
+}
+
+bool MonitorService::wait_for_next_cycle() {
+    for (;;) {
+        int64_t wait = static_cast<int64_t>(config_.poll_interval_minutes) * 60;
+        {
+            std::lock_guard<std::mutex> lock(stats_mutex_);
+            // A market that opens before the next regular check is checked right after it opens.
+            if (stats_.next_open_at > 0) wait = std::max<int64_t>(30, std::min(wait, stats_.next_open_at - unix_now() + 30));
+        }
+        std::unique_lock<std::mutex> lock(loop_mutex_);
+        reschedule_ = false;
+        if (!loop_cv_.wait_for(lock, std::chrono::seconds(wait), [this] { return stopping_ || reschedule_; })) return true;
+        if (stopping_) return false;
+        // Rescheduled: work out the wait again.
+    }
+}
+
+void MonitorService::update_schedule(int64_t now) {
+    if (now == 0) now = unix_now();
+    int64_t before;
+    {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        before = stats_.next_open_at;
+    }
+    const Plan plan = plan_cycle(false, now);
+    const bool was_all_closed = record_plan(plan);
+    if (plan.symbols.empty() && plan.opens_first) {
+        if (!was_all_closed) {
+            log_info("all markets of the watched stocks are closed: no price checks until " + plan.opens_first->name + " opens (" +
+                     local_clock(plan.opens_at, true) + ")");
+        } else if (plan.opens_at < before) {
+            log_info("next price check moved earlier: " + plan.opens_first->name + " opens " + local_clock(plan.opens_at, true));
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(loop_mutex_);
+        reschedule_ = true;
+    }
+    loop_cv_.notify_all();
+}
+
+MonitorService::Plan MonitorService::plan_cycle(bool force, int64_t now) {
+    // A closed market has nothing new once its closing prices are in: skip those stocks until it opens.
+    Plan plan;
+    for (const auto& symbol : repo_.watched_symbols()) {
+        const Market* market = market_for_symbol(symbol);
+        if (!force && market && !market_open(*market, now)) {
+            const auto stock = repo_.get_stock(symbol);
+            if (stock && !stock->last_price_at.empty() && iso_to_unix(stock->last_price_at) >= last_close(*market, now) + kAfterCloseSeconds) {
+                ++plan.closed;
+                const int64_t opens = next_open(*market, now);
+                if (!plan.opens_first || opens < plan.opens_at) {
+                    plan.opens_first = market;
+                    plan.opens_at = opens;
+                }
+                continue;
+            }
+        }
+        plan.symbols.push_back(symbol);
+    }
+    return plan;
+}
+
+bool MonitorService::record_plan(const Plan& plan) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+    const bool was_all_closed = stats_.all_closed;
+    stats_.all_closed = plan.symbols.empty() && plan.closed > 0;
+    stats_.skipped_closed = plan.closed;
+    stats_.next_open_at = plan.opens_at;
+    stats_.next_open_market = plan.opens_first ? plan.opens_first->name : "";
+    return was_all_closed;
 }
 
 void MonitorService::stop() {
@@ -72,24 +141,18 @@ void MonitorService::stop() {
     if (thread_.joinable()) thread_.join();
 }
 
-void MonitorService::run_cycle(bool force) {
-    // A closed market has nothing new once its closing prices are in: skip those stocks until it opens.
-    const int64_t now = unix_now();
-    std::vector<std::string> symbols;
-    size_t closed = 0;
-    for (const auto& symbol : repo_.watched_symbols()) {
-        const Market* market = market_for_symbol(symbol);
-        if (!force && market && !market_open(*market, now)) {
-            const auto stock = repo_.get_stock(symbol);
-            if (stock && !stock->last_price_at.empty() && iso_to_unix(stock->last_price_at) >= last_close(*market, now) + kAfterCloseSeconds) {
-                ++closed;
-                continue;
-            }
-        }
-        symbols.push_back(symbol);
-    }
+void MonitorService::run_cycle(bool force, int64_t now) {
+    if (now == 0) now = unix_now();
+    const Plan plan = plan_cycle(force, now);
+    const bool was_all_closed = record_plan(plan);
+    const auto& symbols = plan.symbols;
+    const size_t closed = plan.closed;
     if (symbols.empty()) {
-        if (closed) log_debug("cycle skipped: the markets of all " + std::to_string(closed) + " watched stocks are closed");
+        // Not an outage, and nothing to fetch: say so once instead of every cycle.
+        if (closed && !was_all_closed) {
+            log_info("all markets of the watched stocks are closed: no price checks until " + plan.opens_first->name + " opens (" +
+                     local_clock(plan.opens_at, true) + ")");
+        }
         return;
     }
     const auto started = std::chrono::steady_clock::now();

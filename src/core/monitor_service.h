@@ -14,6 +14,7 @@
 #include "core/analysis/calibrator.h"
 #include "core/analysis/classifier.h"
 #include "core/market/market_data.h"
+#include "core/markets.h"
 #include "core/ml/pythia.h"
 #include "core/news/news_provider.h"
 #include "core/news/sentiment.h"
@@ -42,6 +43,11 @@ struct CycleStats {
     size_t total = 0;
     int failed_cycles_in_a_row = 0;  // cycles where not a single stock could be refreshed
     std::string last_error;
+    // Stocks not checked because their market is closed (their closing prices are in already).
+    size_t skipped_closed = 0;
+    bool all_closed = false;           // every watched stock's market is closed: nothing is being checked
+    int64_t next_open_at = 0;          // when the first of those markets opens (unix), 0 = none skipped
+    std::string next_open_market;
 };
 
 // Everything known about one stock after a refresh.
@@ -80,7 +86,10 @@ public:
 
     // Refreshes every watched symbol (deduplicated across users) in parallel. Stocks whose market is
     // closed and whose closing prices are already in are skipped, unless `force`.
-    void run_cycle(bool force = false);
+    void run_cycle(bool force = false, int64_t now = 0);  // now: 0 = the current time (tests pass one)
+    // Recomputes which markets are closed and when checking starts again, right away rather than at
+    // the next cycle: call after a stock is added or removed, so a market that opens sooner counts.
+    void update_schedule(int64_t now = 0);
 
     // Fetches prices, resolves old calls, re-learns parameters when due, analyses the latest
     // bar and (if emit_signals) sends PEAK/SUPPORT alerts. Safe to call from any thread.
@@ -100,6 +109,15 @@ public:
     CycleStats last_cycle();
 
 private:
+    struct Plan {
+        std::vector<std::string> symbols;  // to fetch now
+        size_t closed = 0;                 // skipped: market closed, closing prices already in
+        const Market* opens_first = nullptr;
+        int64_t opens_at = 0;
+    };
+    Plan plan_cycle(bool force, int64_t now);
+    bool record_plan(const Plan& plan);  // returns whether every market was closed before
+    bool wait_for_next_cycle();          // false when stopping
     std::mutex& symbol_mutex(const std::string& symbol);
     void emit(const std::string& symbol, const StockReport& report, SignalSide side, double score, double cutoff,
               const std::string& leg_key, double signal_price);
@@ -120,6 +138,7 @@ private:
     std::mutex loop_mutex_;
     std::condition_variable loop_cv_;
     bool stopping_ = false;
+    bool reschedule_ = false;
 };
 
 }  // namespace strojanka

@@ -424,6 +424,7 @@ CommandReply CommandService::monitor(const std::string& user, const std::string&
     std::string report, error;
     if (!ensure_stock(symbol, &report, &error)) return lookup_failed("Could not add **" + symbol + "**", symbol, error, "/monitor stock:");
     repo_.add_watch(user, symbol);
+    monitor_.update_schedule();  // its market may open before the checks were due to start again
     return {true, "Now watching **" + symbol + "**. Here is the first report:\n\n" + report};
 }
 
@@ -438,6 +439,7 @@ CommandReply CommandService::remove(const std::string& user, const std::string& 
                     "**. You cannot remove monitoring while you have shares in it. Record the sale with `/sell` first.");
     }
     repo_.remove_watch(user, symbol);
+    monitor_.update_schedule();
     return {true, "Stopped watching **" + symbol + "**."};
 }
 
@@ -456,6 +458,7 @@ CommandReply CommandService::buy(const std::string& user, const std::string& inp
         return lookup_failed("Could not record the purchase of **" + symbol + "**", symbol, error, "/buy stock:");
     }
     const bool newly_watched = repo_.add_watch(user, symbol);
+    if (newly_watched) monitor_.update_schedule();
 
     TransactionRecord tx;
     tx.user_id = user;

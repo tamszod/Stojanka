@@ -116,6 +116,12 @@ std::string AdminService::status_text() {
       << " | **headlines stored:** " << repo_.count("news_items") << "\n"
       << "**Last price check:** " << ago(cycle.finished_at);
     if (cycle.total) m << ", " << cycle.refreshed << "/" << cycle.total << " stocks refreshed";
+    if (cycle.all_closed) {
+        m << " | **all markets closed:** no price checks until " << cycle.next_open_market << " opens ("
+          << local_clock(cycle.next_open_at, true) << ")";
+    } else if (cycle.skipped_closed) {
+        m << " (" << cycle.skipped_closed << " not checked: market closed)";
+    }
     if (cycle.failed_cycles_in_a_row > 0) m << " \xE2\x9A\xA0\xEF\xB8\x8F last error: " << cycle.last_error;
     m << "\n**News weight:** " << format_double(monitor_.news_weight(), 3) << "\n**Admins:** ";
     const auto all = admins();

@@ -1402,6 +1402,55 @@ void test_markets(const fs::path& dir) {
     CHECK(cmd.run_text("u1", "market budapest").text.find("/monitor stock:OTP.BD") != std::string::npos);
     CHECK(cmd.market("u1", ".L").text.find("London") != std::string::npos);
     CHECK(!cmd.market("u1", "atlantis").ok);
+
+    // Saturday 2026-10-17 12:00 UTC: Budapest closed since Friday 15:00 UTC, opens Monday 07:00 UTC.
+    class CountingProvider : public FakeProvider {
+    public:
+        int calls = 0;
+        std::optional<ChartData> fetch(const std::string& symbol, HistoryRange range, std::string* error) override {
+            ++calls;
+            return FakeProvider::fetch(symbol, range, error);
+        }
+    } counting;
+    counting.bars = make_bars(cyclical_closes(200, 4));
+    MonitorService weekend(repo, counting, config);
+    repo.add_watch("u1", "OTP.BD");
+    StockRecord otp;
+    otp.symbol = "OTP.BD";
+    otp.history_full_refresh_at = utc_now_iso();
+    otp.last_price_at = "2026-10-16T14:00:00Z";  // before Friday's close: the closing prices are still missing
+    repo.upsert_stock(otp);
+    const int64_t saturday = t("2026-10-17T12:00:00Z");
+    weekend.run_cycle(false, saturday);
+    CHECK(counting.calls == 1);  // one check after the close
+    CHECK(!weekend.last_cycle().all_closed);
+    otp = *repo.get_stock("OTP.BD");
+    otp.last_price_at = "2026-10-16T15:20:00Z";  // after the close: nothing new until Monday
+    repo.upsert_stock(otp);
+    weekend.run_cycle(false, saturday);
+    CHECK(counting.calls == 1);
+    const CycleStats closed = weekend.last_cycle();
+    CHECK(closed.all_closed && closed.skipped_closed == 1);
+    CHECK(closed.next_open_market == "Budapest" && closed.next_open_at == t("2026-10-19T07:00:00Z"));
+    CHECK(closed.failed_cycles_in_a_row == 0);  // a closed market isn't an outage
+    // A newly watched stock whose market opens sooner moves the next check earlier: Tokyo opens
+    // Monday 09:00 JST = 00:00 UTC, seven hours before Budapest.
+    repo.add_watch("u1", "7203.T");
+    StockRecord toyota;
+    toyota.symbol = "7203.T";
+    toyota.history_full_refresh_at = utc_now_iso();
+    toyota.last_price_at = "2026-10-16T07:00:00Z";  // after Friday's Tokyo close (06:30 UTC)
+    repo.upsert_stock(toyota);
+    weekend.update_schedule(saturday);
+    CHECK(weekend.last_cycle().all_closed && weekend.last_cycle().skipped_closed == 2);
+    CHECK(weekend.last_cycle().next_open_market == "Tokyo" && weekend.last_cycle().next_open_at == t("2026-10-19T00:00:00Z"));
+    CHECK(counting.calls == 1);  // rescheduling fetches nothing
+    // Something that trades around the clock means checks go on.
+    repo.add_watch("u1", "BTC-USD");
+    weekend.update_schedule(saturday);
+    CHECK(!weekend.last_cycle().all_closed);
+    weekend.run_cycle(true, saturday);  // the console's `check`: everything, closed or not
+    CHECK(counting.calls == 4 && !weekend.last_cycle().all_closed);  // OTP.BD, 7203.T, BTC-USD
 }
 
 void test_backups(const fs::path& dir) {

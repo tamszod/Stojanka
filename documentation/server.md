@@ -76,6 +76,11 @@ The **Markets** tab (Ctrl+3) lists every exchange with its ticker ending, its ho
 computer's time and whether it is open; markets with watched stocks are marked. Prices of a stock
 are only checked while its market is open (plus once just after the close).
 
+When the markets of all watched stocks are closed, for example at the weekend, the **Last price
+check** card shows **Markets closed** and which market opens first ("Tokyo opens Mon 02:00"),
+and nothing is fetched until then. Checking starts again right after that market opens. Adding a
+stock whose market opens sooner moves that time earlier straight away.
+
 ## Running without a window
 
 On a server, or to start the bot from a script, use `start_strojanka.bat` (Windows) or
