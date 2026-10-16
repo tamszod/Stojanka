@@ -144,6 +144,29 @@ struct PoliticianTradeRecord {
     std::string full_name() const { return first_name + " " + last_name; }
 };
 
+// A user's "tell me when the price gets there" alert. direction: +1 = when the price rises to
+// target or above, -1 = when it falls to target or below (set from the price when it was created).
+// It fires once; triggered_at is then set and the alert is no longer checked.
+struct PriceAlertRecord {
+    int64_t id = 0;
+    std::string user_id;
+    std::string symbol;
+    double target = 0;
+    int direction = 1;
+    std::string created_at;
+    std::string triggered_at;
+    double triggered_price = 0;
+};
+
+// Safety alert state for one holding (see core/safety.h). armed: the price has been comfortably
+// above the warning line since the last warning, so the next fall into the zone warns again.
+struct SafetyStateRecord {
+    std::string user_id;
+    std::string symbol;
+    bool armed = false;
+    std::string warned_at;
+};
+
 // One stock checked by the screener. *_edge = conservative lower bound of the hit rate
 // (Wilson, 90%) minus the random-day baseline; above 0 means "beats chance even when skeptical".
 struct ScreenResult {

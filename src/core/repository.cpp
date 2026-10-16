@@ -89,6 +89,13 @@ std::vector<std::string> Repository::watched_symbols() {
     return collect_strings(st);
 }
 
+std::vector<std::string> Repository::symbols_to_check() {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare(
+        "SELECT symbol FROM watchlist UNION SELECT symbol FROM price_alerts WHERE triggered_at IS NULL ORDER BY symbol;");
+    return collect_strings(st);
+}
+
 std::vector<std::string> Repository::watchers(const std::string& symbol) {
     Lock lock(db_.mutex());
     auto st = db_.prepare("SELECT discord_id FROM watchlist WHERE symbol = ?1;");
@@ -223,6 +230,114 @@ std::vector<std::string> Repository::traded_symbols(const std::string& user_id) 
     auto st = db_.prepare("SELECT DISTINCT symbol FROM transactions WHERE discord_id = ?1 ORDER BY symbol;");
     st.bind(1, user_id);
     return collect_strings(st);
+}
+
+std::vector<std::string> Repository::traders(const std::string& symbol) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT DISTINCT discord_id FROM transactions WHERE symbol = ?1 ORDER BY discord_id;");
+    st.bind(1, symbol);
+    return collect_strings(st);
+}
+
+namespace {
+constexpr const char* kPriceAlertColumns =
+    "SELECT id, discord_id, symbol, target, direction, created_at, triggered_at, triggered_price FROM price_alerts ";
+
+std::vector<PriceAlertRecord> collect_price_alerts(Statement& st) {
+    std::vector<PriceAlertRecord> out;
+    while (st.step()) {
+        PriceAlertRecord a;
+        a.id = st.integer(0);
+        a.user_id = st.text(1);
+        a.symbol = st.text(2);
+        a.target = st.real(3);
+        a.direction = static_cast<int>(st.integer(4));
+        a.created_at = st.text(5);
+        a.triggered_at = st.text(6);
+        a.triggered_price = st.real(7);
+        out.push_back(std::move(a));
+    }
+    return out;
+}
+}  // namespace
+
+int64_t Repository::add_price_alert(const PriceAlertRecord& alert) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("INSERT INTO price_alerts(discord_id, symbol, target, direction, created_at) VALUES (?1,?2,?3,?4,?5);");
+    st.bind(1, alert.user_id).bind(2, alert.symbol).bind(3, alert.target).bind(4, alert.direction > 0 ? 1 : -1)
+        .bind(5, alert.created_at.empty() ? utc_now_iso() : alert.created_at);
+    st.step();
+    return db_.last_insert_id();
+}
+
+std::vector<PriceAlertRecord> Repository::active_price_alerts(const std::string& user_id) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare(std::string(kPriceAlertColumns) + "WHERE discord_id = ?1 AND triggered_at IS NULL ORDER BY symbol, target;");
+    st.bind(1, user_id);
+    return collect_price_alerts(st);
+}
+
+std::vector<PriceAlertRecord> Repository::active_price_alerts_for(const std::string& symbol) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare(std::string(kPriceAlertColumns) + "WHERE symbol = ?1 AND triggered_at IS NULL ORDER BY id;");
+    st.bind(1, symbol);
+    return collect_price_alerts(st);
+}
+
+void Repository::mark_price_alert_triggered(int64_t id, double price) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("UPDATE price_alerts SET triggered_at = ?2, triggered_price = ?3 WHERE id = ?1;");
+    st.bind(1, id).bind(2, utc_now_iso()).bind(3, price);
+    st.step();
+}
+
+int Repository::remove_price_alerts(const std::string& user_id, const std::string& symbol, std::optional<double> target) {
+    Lock lock(db_.mutex());
+    // Targets are typed amounts: compare with a little slack so "250" matches a stored 250.0000001.
+    auto st = db_.prepare(
+        "DELETE FROM price_alerts WHERE discord_id = ?1 AND symbol = ?2 AND triggered_at IS NULL "
+        "AND (?3 IS NULL OR ABS(target - ?3) <= 0.000001 * MAX(1, ABS(?3)));");
+    st.bind(1, user_id).bind(2, symbol);
+    if (target) st.bind(3, *target);
+    else st.bind_null(3);
+    st.step();
+    return db_.changes();
+}
+
+std::optional<SafetyStateRecord> Repository::safety_state(const std::string& user_id, const std::string& symbol) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT armed, warned_at FROM safety_state WHERE discord_id = ?1 AND symbol = ?2;");
+    st.bind(1, user_id).bind(2, symbol);
+    if (!st.step()) return std::nullopt;
+    SafetyStateRecord s;
+    s.user_id = user_id;
+    s.symbol = symbol;
+    s.armed = st.integer(0) != 0;
+    s.warned_at = st.text(1);
+    return s;
+}
+
+void Repository::save_safety_state(const SafetyStateRecord& state) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("INSERT OR REPLACE INTO safety_state(discord_id, symbol, armed, warned_at) VALUES (?1,?2,?3,?4);");
+    st.bind(1, state.user_id).bind(2, state.symbol).bind(3, state.armed ? 1 : 0);
+    if (state.warned_at.empty()) st.bind_null(4);
+    else st.bind(4, state.warned_at);
+    st.step();
+}
+
+std::string Repository::user_setting(const std::string& user_id, const std::string& key) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("SELECT value FROM user_settings WHERE discord_id = ?1 AND key = ?2;");
+    st.bind(1, user_id).bind(2, key);
+    return st.step() ? st.text(0) : std::string();
+}
+
+void Repository::set_user_setting(const std::string& user_id, const std::string& key, const std::string& value) {
+    Lock lock(db_.mutex());
+    auto st = db_.prepare("INSERT OR REPLACE INTO user_settings(discord_id, key, value) VALUES (?1,?2,?3);");
+    st.bind(1, user_id).bind(2, key).bind(3, value);
+    st.step();
 }
 
 std::optional<StockParamsRecord> Repository::get_params(const std::string& symbol) {

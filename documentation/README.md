@@ -39,6 +39,7 @@ trading history and your profit.
 | [Installing](installing.md) | Setting up the Discord bot and running the installer |
 | [The server window](server.md) | Running the bot: dashboard, live log and the server command line |
 | [Commands](commands.md) | Everything you can type in Discord |
+| [Strojanka guide](strojanka-guide.html) | One page with everyday answers: markets, alerts, backups, email, updates, the arena |
 | [Pythia, the built-in AI](pythia.md) | What the AI model predicts, how it is tested, and how well it does |
 | [The arena](arena.md) | Trading bots with $1,000 of play money, and how they prove themselves |
 | [Politician trades](politicians.md) | Tracking US Congress stock trade disclosures |

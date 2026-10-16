@@ -74,6 +74,51 @@ you have. Record the sale with `/sell` first.
 ## /remove politician:Pelosi
 Stops watching a politician. As text: `remove politician Nancy Pelosi`.
 
+## /watch stock:NVDA price:250
+A price alert: one direct message when the price gets there. If the price is below 250 now, it
+waits for a rise to 250 or more; if it's above, for a fall to 250 or less. The alert fires once
+and is then done. As text: `watch NVDA 250`.
+
+```
+🔔 I'll tell you once when NVDA (NVIDIA) rises to $250.00 (now $217.23, +15.1% away).
+```
+
+- `/watch` with nothing else lists your price alerts (as text: `watch`).
+- `/unwatch stock:NVDA` removes all your price alerts for NVDA; `/unwatch stock:NVDA price:250` only
+  that one (as text: `unwatch NVDA 250`).
+- The stock doesn't have to be on your watch list: it is checked anyway, but you only get the price
+  alert, not PEAK/SUPPORT alerts.
+- Prices are checked every poll interval (15 minutes by default) while the stock's market is open,
+  so a quick spike between two checks can be missed. At most 25 alerts per person.
+
+## /safety
+Safety alerts protect what you have gained on a stock you hold. When a holding that has been
+comfortably in profit **falls** back close to your buying price, you get a warning while selling would
+still leave a small profit after the sale fee:
+
+> 🛡️ **NVDA** (NVIDIA) is falling and is close to your buying price: **$120.45** now, break-even
+> **$120.07** (average cost $120.00 per share plus a $0.20 sale fee). If you don't want to risk a loss,
+> now is the time to sell: your 3 shares would still make about **+$1.15** after the fee. You don't
+> have to, though: a fall can turn around, and it's your call.
+
+How it decides:
+- **Break-even** = your average cost plus the fee for one sale (0.20 by default, in the stock's
+  currency), per share. Selling below it loses money.
+- **Warn at** = about two normal days' moves of that stock above break-even (at least 1.5%, at most
+  8%): a calm stock is warned close to break-even, a jumpy one earlier.
+- Only while the price is **falling** (lower than at the previous check). A stock that is near
+  break-even but climbing stays quiet.
+- Once per fall. The next warning comes only after the price has climbed back up well above the
+  line. Right after a purchase there is nothing to protect yet: it starts once the stock has risen.
+- If it drops straight past the line between two checks, the message says it has dropped below
+  your buying price and how much selling now would lose.
+
+Commands (as text in brackets):
+- `/safety` shows every holding's price, break-even, warning price and state (`safety`).
+- `/safety fee:0.50` sets what one sale costs you (`safety fee 0.50`).
+- `/safety alerts:off` silences all safety alerts, `alerts:on` turns them back on (`safety off`).
+- `/safety stock:NVDA alerts:off` silences them for one stock only (`safety off NVDA`).
+
 ## /buy stock:FCX shares:0.858291457 paid:59.78$
 Records a purchase. `paid` is the **total** amount you paid for those shares, not the price per
 share. If you were not watching the stock yet, it is added to your watch list.
@@ -221,3 +266,6 @@ Alerts arrive as direct messages:
 - **SUPPORT**: *FCX (Freeport-McMoRan) has reached SUPPORT level. It is time to buy.* Everyone watching the stock gets this.
 
 You get at most one alert per swing.
+
+You can also get **price alerts** you set yourself ([/watch](#watch-stocknvda-price250)) and
+**safety alerts** for stocks you hold ([/safety](#safety)).

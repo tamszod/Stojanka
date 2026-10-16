@@ -57,6 +57,7 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 5. `analyze_series` on the window â†’ last `BarState`; `classify` (category), `short_term_trend`; `upsert_stock`.
 5b. News (skipped entirely for funds: `ChartData::is_fund()`, summary empty, report/alerts say so; otherwise if a `NewsProvider` was given and `stocks.news_fetched_at` > 1 h old): fetch â†’ `add_news`; then `summarize(last 72 h)`; adjusted `peak = state.peak â’ wÂ·tone`, `support = state.support + wÂ·tone` (w = `news_weight()`), stored in `StockReport.peak_score/support_score/news`. Alerts use the adjusted scores; SUPPORT is held back when the summary has red flags. `run_cycle` ends with `learn_news_weight()` (only when the graded-with-news count changed).
 6. If `emit_signals`, the last bar is â‰¤5 days old and the score â‰Ą cutoff: `emit()` â†’ 3-day per-side cooldown (`has_signal_since`) â†’ `insert_signal_if_new` (UNIQUE symbol/side/leg_key) â†’ per watcher message (PEAK only to holders) â†’ `notifications` row â†’ `Notifier::send`.
+7. If `emit_signals` (any bar age): `check_price_alerts` (active `price_alerts` reached by `last_price` -> mark triggered -> `Notifier::send_direct`) and `check_safety` for every trader holding shares unless `user_settings` safety/`safety:<SYM>` = off: `safety_levels(position, sell_fee, profile.daily_vol)` + `safety_step(armed, price, falling = price < previous check's price, levels)` -> Warn / BelowFloor DM, state in `safety_state`.
 
 ## File index
 ### src/common (std only; compiled into core AND installer/packer)

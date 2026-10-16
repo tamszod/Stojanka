@@ -12,6 +12,7 @@
 #include "core/messages.h"
 #include "core/portfolio.h"
 #include "core/markets.h"
+#include "core/safety.h"
 #include "core/thread_pool.h"
 
 namespace strojanka {
@@ -103,7 +104,7 @@ void MonitorService::update_schedule(int64_t now) {
 MonitorService::Plan MonitorService::plan_cycle(bool force, int64_t now) {
     // A closed market has nothing new once its closing prices are in: skip those stocks until it opens.
     Plan plan;
-    for (const auto& symbol : repo_.watched_symbols()) {
+    for (const auto& symbol : repo_.symbols_to_check()) {
         const Market* market = market_for_symbol(symbol);
         if (!force && market && !market_open(*market, now)) {
             const auto stock = repo_.get_stock(symbol);
@@ -332,6 +333,7 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
     const double peak_score = std::clamp(last.peak_score - news_weight * headlines.sentiment, 0.0, 1.0);
     const double support_score = std::clamp(last.support_score + news_weight * headlines.sentiment, 0.0, 1.0);
 
+    const double previous_price = stock.last_price > 0 ? stock.last_price : bars.size() >= 2 ? bars[bars.size() - 2].close : 0;
     stock.last_price = data->last_price > 0 ? data->last_price : bars.back().close;
     stock.last_price_at = utc_now_iso();
     stock.category = category_name(profile.category);
@@ -373,7 +375,53 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
             }
         }
     }
+    // 6. Personal alerts on the current price (not only on finished days).
+    if (emit_signals) {
+        check_price_alerts(stock);
+        check_safety(stock, profile.daily_vol, previous_price);
+    }
     return report;
+}
+
+void MonitorService::check_price_alerts(const StockRecord& stock) {
+    const double price = stock.last_price;
+    if (price <= 0) return;
+    for (const auto& alert : repo_.active_price_alerts_for(stock.symbol)) {
+        if (alert.direction > 0 ? price < alert.target : price > alert.target) continue;
+        repo_.mark_price_alert_triggered(alert.id, price);
+        log_info(stock.symbol + ": price alert of user " + alert.user_id + " reached (" + format_money(price, stock.currency) +
+                 ", asked for " + format_money(alert.target, stock.currency) + (alert.direction > 0 ? " or higher)" : " or lower)"));
+        const Position held = compute_position(repo_.transactions(alert.user_id, stock.symbol));
+        if (notifier_) notifier_->send_direct(alert.user_id, price_alert_message(alert, stock.name, price, stock.currency, &held));
+    }
+}
+
+void MonitorService::check_safety(const StockRecord& stock, double daily_vol, double previous_price) {
+    const double price = stock.last_price;
+    if (price <= 0) return;
+    const bool falling = previous_price > 0 && price < previous_price;
+    for (const auto& user : repo_.traders(stock.symbol)) {
+        if (repo_.user_setting(user, kSafetySettingKey) == "off") continue;
+        if (repo_.user_setting(user, safety_stock_key(stock.symbol)) == "off") continue;
+        const Position position = compute_position(repo_.transactions(user, stock.symbol));
+        if (!position.has_shares()) continue;
+        const double fee = sell_fee_from_setting(repo_.user_setting(user, kSellFeeSettingKey));
+        const SafetyLevels levels = safety_levels(position, fee, daily_vol);
+        const auto stored = repo_.safety_state(user, stock.symbol);
+        SafetyStateRecord state = stored.value_or(SafetyStateRecord{user, stock.symbol, false, ""});
+        const bool was_armed = state.armed;
+        const SafetyAction action = safety_step(state.armed, price, falling, levels);
+        if (action != SafetyAction::None) {
+            state.warned_at = utc_now_iso();
+            const bool below = action == SafetyAction::BelowFloor;
+            log_info(stock.symbol + ": safety alert for user " + user + (below ? " (already below break-even " : " (break-even ") +
+                     format_money(levels.floor, stock.currency) + ", price " + format_money(price, stock.currency) + ")");
+            if (notifier_) {
+                notifier_->send_direct(user, safety_alert(stock.symbol, stock.name, position, price, stock.currency, levels, fee, below));
+            }
+        }
+        if (!stored || state.armed != was_armed || action != SafetyAction::None) repo_.save_safety_state(state);
+    }
 }
 
 double MonitorService::news_weight() {

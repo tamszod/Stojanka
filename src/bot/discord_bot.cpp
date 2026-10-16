@@ -134,10 +134,21 @@ void DiscordBot::post_to_public_channel(const std::string& message) {
 }
 
 void DiscordBot::send_direct(const std::string& user_id, const std::string& message) {
-    cluster_.direct_message_create(to_snowflake(user_id), dpp::message(fit_message(message)),
-                                   [user_id](const dpp::confirmation_callback_t& cb) {
-                                       if (cb.is_error()) log_warn("could not DM admin " + user_id + ": " + cb.get_error().message);
-                                   });
+    cluster_.direct_message_create(
+        to_snowflake(user_id), dpp::message(fit_message(message)), [this, user_id, message](const dpp::confirmation_callback_t& cb) {
+            if (!cb.is_error()) return;
+            // DMs can be disabled by the user; fall back to the channel they last used a command in.
+            const std::string dm_error = cb.get_error().message;
+            const std::string channel = repo_.user_notify_channel(user_id);
+            if (channel.empty()) {
+                log_warn("could not DM user " + user_id + ": " + dm_error);
+                return;
+            }
+            cluster_.message_create(dpp::message(to_snowflake(channel), fit_message("<@" + user_id + "> " + message)),
+                                    [user_id, dm_error](const dpp::confirmation_callback_t& cb2) {
+                                        if (cb2.is_error()) log_warn("could not DM user " + user_id + ": " + dm_error);
+                                    });
+        });
 }
 
 void DiscordBot::register_commands() {
@@ -169,6 +180,24 @@ void DiscordBot::register_commands() {
     remove.add_option(stock_option(false));
     remove.add_option(politician_option());
     cmds.push_back(remove);
+
+    dpp::slashcommand watch("watch", "A message when a stock reaches a price; leave empty to list your price alerts", app);
+    watch.add_option(stock_option(false));
+    watch.add_option(dpp::command_option(dpp::co_string, "price", "The price to tell you at, e.g. 250 or 249.90$", false));
+    cmds.push_back(watch);
+
+    dpp::slashcommand unwatch("unwatch", "Remove your price alerts for a stock", app);
+    unwatch.add_option(stock_option(true));
+    unwatch.add_option(dpp::command_option(dpp::co_string, "price", "Only the alert at this price", false));
+    cmds.push_back(unwatch);
+
+    dpp::slashcommand safety("safety", "Warnings before a stock you hold turns into a loss: levels, on/off, sale fee", app);
+    safety.add_option(dpp::command_option(dpp::co_string, "alerts", "Turn safety alerts on or off", false)
+                          .add_choice(dpp::command_option_choice("on", std::string("on")))
+                          .add_choice(dpp::command_option_choice("off", std::string("off"))));
+    safety.add_option(dpp::command_option(dpp::co_string, "fee", "What one sale costs you, e.g. 0.20 (the default)", false));
+    safety.add_option(dpp::command_option(dpp::co_string, "stock", "Turn them on or off for this stock only", false));
+    cmds.push_back(safety);
 
     dpp::slashcommand politicians("politicians", "Recent US Congress (House and Senate) stock trades; empty for everyone", app);
     politicians.add_option(dpp::command_option(dpp::co_string, "name", "Only trades matching this name", false));
@@ -265,8 +294,12 @@ void DiscordBot::on_command(const dpp::slashcommand_t& event) {
     const std::string stock = name == "suggest" ? param("side") : name == "arena" ? param("bot") : name == "market" ? param("market") : param("stock");
     // `name` (politicians) and `politician` (monitor/remove) travel in the same slot.
     const std::string politician = name == "politicians" ? param("name") : param("politician");
-    const std::string shares = param("shares");
-    const std::string amount = name == "sell" ? param("received") : param("paid");
+    // `alerts` (safety) travels in the shares slot; `price` (watch) and `fee` (safety) in the amount slot.
+    const std::string shares = name == "safety" ? param("alerts") : param("shares");
+    const std::string amount = name == "sell"                         ? param("received")
+                               : name == "watch" || name == "unwatch" ? param("price")
+                               : name == "safety"                     ? param("fee")
+                                                                      : param("paid");
     const std::string token = event.command.token;
     // /admin uses sub-commands: args = {sub-command, its option values...}
     std::vector<std::string> admin_args;
@@ -322,6 +355,9 @@ CommandReply DiscordBot::dispatch(const std::string& name, const std::string& us
         if (name == "monitor") return politician.empty() ? commands_.monitor(user, stock) : commands_.monitor_politician(user, politician);
         return politician.empty() ? commands_.remove(user, stock) : commands_.remove_politician(user, politician);
     }
+    if (name == "watch") return commands_.watch(user, stock, amount);
+    if (name == "unwatch") return commands_.unwatch(user, stock, amount);
+    if (name == "safety") return commands_.safety(user, shares, amount, stock);
     if (name == "buy") return commands_.buy(user, stock, shares, amount);
     if (name == "sell") return commands_.sell(user, stock, shares, amount);
     if (name == "report") return commands_.report(user, stock);

@@ -32,6 +32,7 @@
 #include "core/monitor_service.h"
 #include "core/portfolio.h"
 #include "core/repository.h"
+#include "core/safety.h"
 #include "core/run_state.h"
 #include "common/instance_lock.h"
 #include "core/admin_service.h"
@@ -1808,6 +1809,155 @@ void test_portfolio_and_history(const fs::path& dir) {
     CHECK(cmd.help().text.size() < 2000);
 }
 
+
+void test_price_and_safety_alerts(const fs::path& dir) {
+    // The safety levels and their state machine on their own.
+    Position pos;
+    pos.shares = 2;
+    pos.cost_basis = 200;  // average cost 100
+    const SafetyLevels l = safety_levels(pos, 0.20, 0.01);
+    CHECK_NEAR(l.floor, 100.10, 1e-9);  // what it cost plus the 0.20 fee, per share
+    CHECK_NEAR(l.cushion, 0.02, 1e-12);  // two days' moves
+    CHECK_NEAR(l.warn, 100.10 * 1.02, 1e-9);
+    CHECK_NEAR(l.rearm, 100.10 * 1.04, 1e-9);
+    CHECK_NEAR(safety_levels(pos, 0.20, 0.001).cushion, kMinCushion, 1e-12);
+    CHECK_NEAR(safety_levels(pos, 0.20, 0.5).cushion, kMaxCushion, 1e-12);
+    bool armed = false;
+    CHECK(safety_step(armed, 101.5, true, l) == SafetyAction::None && !armed);  // just bought: not clearly in profit yet
+    CHECK(safety_step(armed, 105, false, l) == SafetyAction::None && armed);    // comfortably in profit
+    CHECK(safety_step(armed, 103, true, l) == SafetyAction::None && armed);     // falling, not near yet
+    CHECK(safety_step(armed, 102, false, l) == SafetyAction::None && armed);    // near, but rising again: quiet
+    CHECK(safety_step(armed, 101.9, true, l) == SafetyAction::Warn && !armed);  // near and falling
+    CHECK(safety_step(armed, 101, true, l) == SafetyAction::None);              // one warning only
+    CHECK(safety_step(armed, 99, true, l) == SafetyAction::None);
+    CHECK(safety_step(armed, 104.2, false, l) == SafetyAction::None && armed);  // climbed back: can warn again
+    CHECK(safety_step(armed, 95, false, l) == SafetyAction::None && armed);     // below, but rising: quiet
+    CHECK(safety_step(armed, 94, true, l) == SafetyAction::BelowFloor && !armed);  // fell past the whole zone
+    CHECK_NEAR(sell_fee_from_setting(""), kDefaultSellFee, 1e-12);
+    CHECK_NEAR(sell_fee_from_setting("0,5"), 0.5, 1e-12);
+    CHECK_NEAR(sell_fee_from_setting("abc"), kDefaultSellFee, 1e-12);
+    CHECK_NEAR(daily_volatility(make_bars(std::vector<double>(80, 50.0))), 0.0, 1e-12);
+    CHECK(daily_volatility(make_bars(cyclical_closes(80, 2))) > 0.003);
+    CHECK_NEAR(daily_volatility(make_bars(std::vector<double>(5, 50.0))), 0.0, 1e-12);  // too short
+
+    // Through the monitor: the price comes from the newest bar.
+    Database db(path_utf8(dir / "alerts.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    FakeProvider provider;
+    const auto base = make_bars(cyclical_closes(300, 9));
+    auto set_price = [&](double price) {
+        provider.bars = base;
+        provider.bars.back().close = price;
+    };
+    Config config;
+    MonitorService monitor(repo, provider, config);
+    RecordingNotifier notifier;
+    monitor.set_notifier(&notifier);
+    CommandService cmd(repo, monitor);
+    auto check_at = [&](double price) {
+        set_price(price);
+        std::string err;
+        CHECK(monitor.refresh("ACME", true, &err).has_value());
+    };
+    auto count = [&](const std::string& user, const std::string& text) {
+        size_t n = 0;
+        for (const auto& [u, m] : notifier.direct) n += u == user && m.find(text) != std::string::npos;
+        return n;
+    };
+
+    // /watch
+    set_price(130);
+    CHECK(cmd.monitor("u1", "ACME").ok);
+    CHECK(!cmd.watch("u1", "ACME", "").ok);      // needs a price
+    CHECK(!cmd.watch("u1", "ACME", "abc").ok);
+    CHECK(!cmd.watch("u1", "", "150").ok);       // needs a stock
+    CHECK(!cmd.watch("u1", "NOPE", "150").ok);
+    const auto up = cmd.watch("u1", "acme", "150$");
+    CHECK(up.ok && up.text.find("rises to **$150.00**") != std::string::npos);
+    CHECK(up.text.find("watch list") == std::string::npos);  // u1 watches ACME already
+    CHECK(cmd.watch("u1", "ACME", "150").text.find("already have") != std::string::npos);
+    CHECK(cmd.watch("u1", "ACME", "110").text.find("falls to **$110.00**") != std::string::npos);
+    CHECK(!cmd.watch("u1", "ACME", "130").ok);   // already there
+    const auto list = cmd.run_text("u1", "watch");
+    CHECK(list.text.find("rises to") != std::string::npos && list.text.find("falls to") != std::string::npos);
+
+    // A stock with only a price alert is still checked, and the reply says it isn't watched.
+    const auto beta = cmd.watch("u5", "BETA", "500");
+    CHECK(beta.ok && beta.text.find("isn't on your watch list") != std::string::npos);
+    const auto to_check = repo.symbols_to_check();
+    CHECK(std::find(to_check.begin(), to_check.end(), "BETA") != to_check.end());
+    const auto watched = repo.watched_symbols();
+    CHECK(std::find(watched.begin(), watched.end(), "BETA") == watched.end());
+    CHECK(cmd.run_text("u5", "unwatch BETA 500").ok);
+    CHECK(!cmd.unwatch("u5", "BETA", "").ok);    // nothing left
+    CHECK(!cmd.run_text("u5", "unwatch").ok);    // usage
+    const auto after = repo.symbols_to_check();
+    CHECK(std::find(after.begin(), after.end(), "BETA") == after.end());
+
+    check_at(140);
+    CHECK(count("u1", "reached your price") == 0);
+    check_at(151);
+    CHECK(count("u1", "reached your price") == 1);
+    CHECK(count("u1", "$151.00") == 1);
+    check_at(152);
+    CHECK(count("u1", "reached your price") == 1);  // fires once
+    check_at(105);
+    CHECK(count("u1", "or lower") == 1);
+    CHECK(cmd.watch("u1", "", "").text.find("no price alerts") != std::string::npos);
+    CHECK(cmd.watch("u1", "ACME", "300").ok);
+    CHECK(cmd.unwatch("u1", "ACME", "300.00").text.find("Removed 1") != std::string::npos);
+    CHECK(!cmd.unwatch("u1", "ACME", "300").ok);
+
+    // Safety alerts: u2 holds 2 ACME for $200 (break-even $100.10 with the $0.20 fee).
+    CHECK(cmd.buy("u2", "ACME", "2", "200$").ok);
+    check_at(101);  // not clearly in profit yet: nothing to protect
+    check_at(100.5);
+    CHECK(count("u2", "close to your buying price") == 0);
+    check_at(130);  // comfortably in profit: armed
+    check_at(100.45);  // falling, close to break-even (rising there stays quiet: see the safety_step checks)
+    CHECK(count("u2", "is falling and is close to your buying price") == 1);
+    CHECK(count("u2", "+$0.70") == 1);  // 2 x 100.45 - 200 - 0.20
+    CHECK(count("u2", "/safety stock:ACME alerts:off") == 1);  // says how to silence it
+    check_at(100.3);
+    CHECK(count("u2", "close to your buying price") == 1);  // one warning per fall
+    CHECK(count("u1", "close to your buying price") == 0);  // u1 holds nothing
+
+    const auto levels = cmd.safety("u2", "", "");
+    CHECK(levels.ok && levels.text.find("BREAK-EVEN") != std::string::npos && levels.text.find("$100.10") != std::string::npos);
+    CHECK(cmd.safety("u1", "", "").text.find("nothing to protect") != std::string::npos);
+    CHECK(!cmd.safety("u2", "maybe", "").ok);
+    CHECK(!cmd.safety("u2", "", "-1").ok);
+
+    // Off, for everything or just this stock: no warnings.
+    CHECK(cmd.run_text("u2", "safety off").text.find("off") != std::string::npos);
+    check_at(130);
+    check_at(100.5);
+    CHECK(count("u2", "close to your buying price") == 1);
+    CHECK(cmd.safety("u2", "on", "").ok);
+    CHECK(!cmd.safety("u2", "", "", "ACME").ok);  // a stock needs on or off
+    const auto muted = cmd.run_text("u2", "safety off acme");
+    CHECK(muted.text.find("for **ACME** are off") != std::string::npos && muted.text.find("silenced") != std::string::npos);
+    check_at(130);
+    check_at(100.5);
+    CHECK(count("u2", "close to your buying price") == 1);
+    CHECK(cmd.safety("u2", "on", "", "ACME").ok);
+
+    // A fall straight past the zone, with a 0.50 fee (break-even $100.25).
+    CHECK(cmd.run_text("u2", "safety fee 0,50").text.find("$100.25") != std::string::npos);
+    check_at(130);
+    check_at(80);
+    CHECK(count("u2", "dropped below your buying price") == 1);
+    CHECK(count("u2", "-$40.50") == 1);  // 2 x 80 - 200 - 0.50
+
+    // Sold everything: no more safety alerts.
+    CHECK(cmd.sell("u2", "ACME", "2", "160$").ok);
+    check_at(130);
+    check_at(100.5);
+    CHECK(count("u2", "close to your buying price") == 1);
+    CHECK(cmd.help().text.size() < 2000);
+}
+
 }  // namespace
 
 int main() {
@@ -1844,6 +1994,7 @@ int main() {
         {"update backup: write, read, expire", [&] { test_update_backup(dir); }},
         {"markets: endings, daylight saving, hours, /market", [&] { test_markets(dir); }},
         {"backups: file, reminders, email setting", [&] { test_backups(dir); }},
+        {"price alerts (/watch) and safety alerts", [&] { test_price_and_safety_alerts(dir); }},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

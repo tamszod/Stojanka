@@ -36,14 +36,50 @@ std::string alert_evidence(int correct, int signals, double baseline) {
     return s;
 }
 
-// "**FCX** (Freeport-McMoRan)": the ticker, plus the short company name when it says more.
+}  // namespace
+
 std::string stock_label(const std::string& symbol, const std::string& company) {
     const std::string name = short_company_name(company, 40);
     if (name.empty() || to_upper(name) == to_upper(symbol)) return "**" + symbol + "**";
     return "**" + symbol + "** (" + name + ")";
 }
 
-}  // namespace
+std::string price_alert_message(const PriceAlertRecord& alert, const std::string& company, double price,
+                                const std::string& currency, const Position* held) {
+    std::ostringstream m;
+    m << "\xF0\x9F\x94\x94 " << stock_label(alert.symbol, company) << " reached your price: **" << format_money(price, currency)
+      << "** (you asked for " << format_money(alert.target, currency) << (alert.direction > 0 ? " or higher" : " or lower") << ").";
+    if (held && held->has_shares()) {
+        m << "\nYou hold " << format_shares(held->shares) << " shares, worth " << format_money(held->market_value(price), currency)
+          << " (" << format_signed_money(held->unrealized_profit(price), currency) << " on what you paid).";
+    }
+    m << "\nThis alert is done; set another with `/watch`.";
+    return m.str();
+}
+
+std::string safety_alert(const std::string& symbol, const std::string& company, const Position& position, double price,
+                         const std::string& currency, const SafetyLevels& levels, double fee, bool below) {
+    const double after_fee = position.market_value(price) - position.cost_basis - fee;
+    const std::string why = "average cost " + format_money(position.average_cost(), currency) + " per share plus a " +
+                            format_money(fee, currency) + " sale fee";
+    std::ostringstream m;
+    m << "\xF0\x9F\x9B\xA1\xEF\xB8\x8F ";
+    if (below) {
+        m << stock_label(symbol, company) << " is falling and has dropped below your buying price: **" << format_money(price, currency)
+          << "** now, break-even " << format_money(levels.floor, currency) << " (" << why << ").\n"
+          << "If you want to cut your losses, you can sell now: your " << format_shares(position.shares)
+          << " shares would lose about **" << format_signed_money(after_fee, currency) << "** after the fee.";
+    } else {
+        m << stock_label(symbol, company) << " is falling and is close to your buying price: **" << format_money(price, currency)
+          << "** now, break-even **" << format_money(levels.floor, currency) << "** (" << why << ").\n"
+          << "If you don't want to risk a loss, now is the time to sell: your " << format_shares(position.shares)
+          << " shares would still make about **" << format_signed_money(after_fee, currency) << "** after the fee.";
+    }
+    m << " You don't have to, though: a fall can turn around, and it's your call.\n"
+      << "I'll warn again only after it has climbed back above " << format_money(levels.rearm, currency) << ". Silence these with `/safety stock:"
+      << symbol << " alerts:off` (this stock) or `/safety alerts:off` (all).";
+    return m.str();
+}
 
 bool has_proven_edge(int correct, int signals, double baseline) {
     return signals >= kMinCallsForEdge && static_cast<double>(correct) / signals >= baseline + kEdgeMargin;

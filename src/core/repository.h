@@ -26,6 +26,8 @@ public:
     std::vector<std::string> user_watchlist(const std::string& user_id);
     std::vector<std::string> watched_symbols();
     std::vector<std::string> watchers(const std::string& symbol);
+    // What the monitor fetches: watched stocks plus stocks with an active price alert.
+    std::vector<std::string> symbols_to_check();
 
     // stocks
     void upsert_stock(const StockRecord& stock);
@@ -40,6 +42,21 @@ public:
     int64_t add_transaction(const TransactionRecord& tx);
     std::vector<TransactionRecord> transactions(const std::string& user_id, const std::string& symbol = "");
     std::vector<std::string> traded_symbols(const std::string& user_id);
+    std::vector<std::string> traders(const std::string& symbol);  // users with any trade in it
+
+    // price alerts (/watch)
+    int64_t add_price_alert(const PriceAlertRecord& alert);
+    std::vector<PriceAlertRecord> active_price_alerts(const std::string& user_id);  // by symbol, then target
+    std::vector<PriceAlertRecord> active_price_alerts_for(const std::string& symbol);
+    void mark_price_alert_triggered(int64_t id, double price);
+    // Removes the user's active alerts for the symbol (only the one at `target` if given); returns how many.
+    int remove_price_alerts(const std::string& user_id, const std::string& symbol, std::optional<double> target);
+
+    // safety alerts and user settings
+    std::optional<SafetyStateRecord> safety_state(const std::string& user_id, const std::string& symbol);
+    void save_safety_state(const SafetyStateRecord& state);
+    std::string user_setting(const std::string& user_id, const std::string& key);  // "" if not set
+    void set_user_setting(const std::string& user_id, const std::string& key, const std::string& value);
 
     // learned parameters
     std::optional<StockParamsRecord> get_params(const std::string& symbol);

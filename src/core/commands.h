@@ -33,6 +33,14 @@ public:
     CommandReply history(const std::string& user, const std::string& symbol_or_empty);
     CommandReply monitor(const std::string& user, const std::string& symbol);
     CommandReply remove(const std::string& user, const std::string& symbol);
+    // `/watch stock:NVDA price:250`: one message when the price rises (or falls) to there. With no
+    // stock, the user's active price alerts. `/unwatch` removes them (price: "" = all for the stock).
+    CommandReply watch(const std::string& user, const std::string& symbol, const std::string& price);
+    CommandReply unwatch(const std::string& user, const std::string& symbol, const std::string& price);
+    // `/safety`: warnings before a holding turns into a loss. setting: "on", "off" or "" (keep), for
+    // every stock or only `symbol`; fee: what one sale costs ("" = keep). Answers with the levels.
+    CommandReply safety(const std::string& user, const std::string& setting, const std::string& fee,
+                        const std::string& symbol = "");
     // Personal politician-trade watch (separate from stock watching): a direct message when
     // this politician discloses a new trade. Every new disclosure is also posted to the
     // server's public channel regardless of who is personally watching (see admin_service.h).
@@ -69,6 +77,7 @@ public:
 private:
     // Makes sure the stock exists in the database (downloading history the first time).
     bool ensure_stock(const std::string& symbol, std::string* report_text, std::string* error);
+    CommandReply price_alerts(const std::string& user);
     // "<intro>: <error>", plus matching listings when the ticker wasn't found (CSPX -> CSPX.L).
     // example_command is the slash command to show with the first match, e.g. "/monitor stock:".
     CommandReply lookup_failed(const std::string& intro, const std::string& symbol, const std::string& error,

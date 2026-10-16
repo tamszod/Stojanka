@@ -2,7 +2,7 @@
 
 SQLite, one file (default `<install>/data/strojanka.db`, path in `strojanka.conf: database_path`).
 Opened with WAL journal (so `-wal`/`-shm` side files appear while running), foreign keys on.
-Schema version = `PRAGMA user_version`. Current: **7** (`src/core/migrations.cpp`; v2 = `screen_results`; v3 = `news_items`, `signals.news_sentiment`, `stocks.news_fetched_at`; v4 = `admins`; v5 = arena tables; v6 = `ml_models`; v7 = `politician_trades`, `politician_watch`).
+Schema version = `PRAGMA user_version`. Current: **8** (`src/core/migrations.cpp`; v2 = `screen_results`; v3 = `news_items`, `signals.news_sentiment`, `stocks.news_fetched_at`; v4 = `admins`; v5 = arena tables; v6 = `ml_models`; v7 = `politician_trades`, `politician_watch`; v8 = `price_alerts`, `safety_state`, `user_settings`).
 Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → integrity_check → swap handle under the mutex → delete old db/-wal/-shm); `AdminService::move_database` also rewrites `database_path` in strojanka.conf.
 
 ## Migration rules
@@ -32,6 +32,9 @@ Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → i
 | `politician_trades(id, chamber, first_name, last_name, office, filed_date, report_id, item_number, transaction_date, owner, ticker, asset_name, asset_type, transaction_type, amount_min, amount_max, has_amount_max, comment, fetched_at, is_public) UNIQUE(report_id,item_number)` (v7) | every parsed Senate PTR transaction, deduplicated | `PoliticianService::tick` → `add_politician_trades` (INSERT OR IGNORE, only newly-inserted rows returned with `id` set) | `has_amount_max` flags an open-ended range ("Over $50,000,000") since SQLite has no nullable-REAL marker; index on `(last_name, first_name)` |
 | `politician_watch(discord_id, politician) PK(discord_id,politician)` (v7) | personal watch, mirrors `watchlist` | `monitor politician:<name>` / `remove politician:<name>` | name stored lower-cased/trimmed; `politician_watchers(name)` looks up who to DM |
 | `notifications(id, signal_id→signals, discord_id, message, delivered, error, created_at)` | delivery log per user | `emit`, `DiscordBot::send` callback | |
+| `price_alerts(id, discord_id, symbol, target, direction ±1, created_at, triggered_at, triggered_price)` (v8) | `/watch` alerts; active = `triggered_at IS NULL` | `CommandService::watch/unwatch`, `MonitorService::check_price_alerts` | direction set from the price at creation; fires once; `symbols_to_check()` = watchlist ∪ active alerts |
+| `safety_state(discord_id, symbol, armed, warned_at) PK(discord_id,symbol)` (v8) | safety-alert state machine per holding | `MonitorService::check_safety` (`core/safety.h`) | armed once price ≥ rearm line, cleared on a warning |
+| `user_settings(discord_id, key, value) PK(discord_id,key)` (v8) | per-user settings | `/safety` | keys: `safety` (off), `safety:<SYMBOL>` (off), `sell_fee` |
 
 ## Handy queries
 ```sql

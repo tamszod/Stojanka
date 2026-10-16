@@ -12,6 +12,7 @@
 #include "core/arena/arena_service.h"
 #include "core/ml/pythia.h"
 #include "core/portfolio.h"
+#include "core/safety.h"
 #include "core/screener.h"
 #include "core/version.h"
 
@@ -47,6 +48,8 @@ CommandReply CommandService::help() const {
       << "`/monitor stock:FCX` - watch a stock or ETF and get a report; outside the US add the exchange ending, "
       << "e.g. `CSPX.L` (London), `OTP.BD` (Budapest)\n"
       << "`/remove stock:FCX` - stop watching (only when you hold none)\n"
+      << "`/watch stock:NVDA price:250` - one message when the price gets there | `/safety` - a warning before "
+      << "a stock you hold turns into a loss\n"
       << "`/buy stock:FCX shares:0.858291457 paid:59.78$` / `/sell ... received:67.87$` - record a trade (total amounts)\n"
       << "`/report stock:FCX` - analysis | `/news stock:FCX` - headlines | `/suggest` - stocks with proven signals\n"
       << "`/market` - exchanges: ticker ending, opening hours, open now?\n"
@@ -443,6 +446,179 @@ CommandReply CommandService::remove(const std::string& user, const std::string& 
     return {true, "Stopped watching **" + symbol + "**."};
 }
 
+namespace {
+constexpr size_t kMaxPriceAlerts = 25;
+bool same_price(double a, double b) { return std::fabs(a - b) <= 1e-6 * std::max(1.0, std::fabs(b)); }
+}  // namespace
+
+CommandReply CommandService::watch(const std::string& user, const std::string& input, const std::string& price_text) {
+    if (trim(input).empty()) {
+        if (!trim(price_text).empty()) return fail("Which stock? For example `/watch stock:NVDA price:250`.");
+        return price_alerts(user);
+    }
+    std::string symbol;
+    CommandReply err;
+    if (!parse_symbol(input, symbol, err)) return err;
+    if (trim(price_text).empty()) {
+        return fail("At what price? For example `/watch stock:" + symbol + " price:250`. `/watch` alone lists your price alerts.");
+    }
+    const auto target = parse_amount(price_text);
+    if (!target || *target <= 0) return fail("`" + price_text + "` is not a valid price. Example: `250` or `249.90$`.");
+    const auto existing = repo_.active_price_alerts(user);
+    for (const auto& a : existing) {
+        if (a.symbol == symbol && same_price(a.target, *target)) return {true, "You already have that price alert. `/watch` lists them all."};
+    }
+    if (existing.size() >= kMaxPriceAlerts) {
+        return fail("You already have " + std::to_string(existing.size()) + " price alerts, the most I keep. Remove one with `/unwatch`.");
+    }
+
+    // The direction comes from the current price, so make sure it is current.
+    const auto stored = repo_.get_stock(symbol);
+    if (!stored || stored->last_price <= 0 || unix_now() - iso_to_unix(stored->last_price_at) > 3600) {
+        std::string error;
+        if (!monitor_.refresh(symbol, false, &error)) {
+            return lookup_failed("Could not set a price alert for **" + symbol + "**", symbol, error, "/watch stock:");
+        }
+    }
+    const auto stock = repo_.get_stock(symbol);
+    const double now = stock ? stock->last_price : 0;
+    const std::string cur = stock ? stock->currency : "USD";
+    if (now <= 0) return fail("There is no current price for **" + symbol + "** yet. Try again in a few minutes.");
+    if (same_price(now, *target) || std::fabs(*target - now) < 0.0005 * now) {
+        return fail("**" + symbol + "** is already at " + format_money(now, cur) + ".");
+    }
+
+    PriceAlertRecord alert;
+    alert.user_id = user;
+    alert.symbol = symbol;
+    alert.target = *target;
+    alert.direction = *target > now ? 1 : -1;
+    repo_.add_price_alert(alert);
+    monitor_.update_schedule();  // it may be the first stock of its market being checked
+
+    std::ostringstream m;
+    m << "\xF0\x9F\x94\x94 I'll tell you once when " << stock_label(symbol, stock->name)
+      << (alert.direction > 0 ? " rises to **" : " falls to **") << format_money(*target, cur) << "** (now "
+      << format_money(now, cur) << ", " << signed_percent(*target / now - 1) << " away). The price is checked every "
+      << monitor_.poll_interval_minutes() << " minutes while its market is open.";
+    if (!repo_.is_watching(user, symbol)) {
+        m << "\nIt isn't on your watch list, so you get only this price alert, no PEAK/SUPPORT alerts (`/monitor stock:"
+          << symbol << "` for those).";
+    }
+    return {true, m.str()};
+}
+
+CommandReply CommandService::price_alerts(const std::string& user) {
+    const auto alerts = repo_.active_price_alerts(user);
+    if (alerts.empty()) {
+        return {true, "You have no price alerts. Set one with `/watch stock:NVDA price:250`: I'll message you once when the "
+                      "price gets there."};
+    }
+    std::ostringstream table;
+    table << pad("STOCK", 9) << pad("WHEN", 10) << pad("TARGET", 12) << pad("NOW", 12) << "AWAY\n";
+    for (const auto& a : alerts) {
+        const auto stock = repo_.get_stock(a.symbol);
+        const std::string cur = stock ? stock->currency : "USD";
+        const double now = stock ? stock->last_price : 0;
+        table << pad(a.symbol, 9) << pad(a.direction > 0 ? "rises to" : "falls to", 10) << pad(format_money(a.target, cur), 12)
+              << pad(now > 0 ? format_money(now, cur) : "?", 12) << (now > 0 ? signed_percent(a.target / now - 1) : "?") << "\n";
+    }
+    std::ostringstream m;
+    m << "**Your price alerts**\n```\n" << table.str() << "```\n"
+      << "Each one messages you once. Remove one with `/unwatch stock:" << alerts.front().symbol << " price:"
+      << format_double(alerts.front().target, 2) << "`, or all of a stock without `price`.";
+    return {true, m.str()};
+}
+
+CommandReply CommandService::unwatch(const std::string& user, const std::string& input, const std::string& price_text) {
+    std::string symbol;
+    CommandReply err;
+    if (!parse_symbol(input, symbol, err)) return err;
+    std::optional<double> target;
+    if (!trim(price_text).empty()) {
+        target = parse_amount(price_text);
+        if (!target) return fail("`" + price_text + "` is not a valid price.");
+    }
+    const int removed = repo_.remove_price_alerts(user, symbol, target);
+    if (removed == 0) {
+        return fail("You have no price alert for **" + symbol + "**" + (target ? " at " + trim(price_text) : std::string()) +
+                    ". `/watch` lists yours.");
+    }
+    monitor_.update_schedule();
+    return {true, "Removed " + std::to_string(removed) + " price alert" + (removed == 1 ? "" : "s") + " for **" + symbol + "**."};
+}
+
+CommandReply CommandService::safety(const std::string& user, const std::string& setting_input, const std::string& fee_input,
+                                    const std::string& symbol_input) {
+    const std::string setting = to_lower(trim(setting_input));
+    if (!setting.empty() && setting != "on" && setting != "off") return fail("Use `/safety alerts:on` or `/safety alerts:off`.");
+    std::string symbol;
+    if (!trim(symbol_input).empty()) {
+        CommandReply err;
+        if (!parse_symbol(symbol_input, symbol, err)) return err;
+        if (setting.empty()) return fail("Turn them on or off for **" + symbol + "**: `/safety stock:" + symbol + " alerts:off`.");
+    }
+    std::string changed;
+    if (!trim(fee_input).empty()) {
+        const auto fee = parse_amount(fee_input);
+        if (!fee || *fee < 0 || *fee > 1000) return fail("`" + fee_input + "` is not a valid fee. Example: `0.20`.");
+        repo_.set_user_setting(user, kSellFeeSettingKey, format_double(*fee, 4));
+        changed += "Sale fee set to " + format_double(*fee, 2) + ". ";
+    }
+    if (!setting.empty() && !symbol.empty()) {
+        repo_.set_user_setting(user, safety_stock_key(symbol), setting);
+        changed += "Safety alerts for **" + symbol + "** are " + setting + ". ";
+    } else if (!setting.empty()) {
+        repo_.set_user_setting(user, kSafetySettingKey, setting);
+        changed += setting == "on" ? "Safety alerts are on. " : "Safety alerts are off. ";
+    }
+    const bool on = repo_.user_setting(user, kSafetySettingKey) != "off";
+    const double fee = sell_fee_from_setting(repo_.user_setting(user, kSellFeeSettingKey));
+
+    std::ostringstream m;
+    if (!changed.empty()) m << changed << "\n";
+    m << "**Safety alerts: " << (on ? "on" : "off") << "** (sale fee " << format_double(fee, 2)
+      << " per sale, in each stock's currency)\n";
+    if (!on) {
+        m << "You get no warnings when a stock you hold falls toward what you paid. `/safety alerts:on` turns them back on.";
+        return {true, m.str()};
+    }
+
+    std::map<std::string, std::vector<TransactionRecord>> by_symbol;
+    for (auto& t : repo_.transactions(user)) by_symbol[t.symbol].push_back(std::move(t));
+    std::ostringstream table;
+    int rows = 0;
+    table << pad("STOCK", 9) << pad("PRICE", 11) << pad("BREAK-EVEN", 12) << pad("WARN AT", 11) << "STATE\n";
+    for (const auto& [symbol, txs] : by_symbol) {
+        const Position position = compute_position(txs);
+        if (!position.has_shares()) continue;
+        const auto stock = repo_.get_stock(symbol);
+        const std::string cur = stock ? stock->currency : "USD";
+        const double price = stock ? stock->last_price : 0;
+        const SafetyLevels l = safety_levels(position, fee, daily_volatility(repo_.load_bars(symbol, 61)));
+        const auto state = repo_.safety_state(user, symbol);
+        std::string status;
+        if (repo_.user_setting(user, safety_stock_key(symbol)) == "off") status = "silenced";
+        else if (price <= 0) status = "no price yet";
+        else if (price <= l.floor) status = "below break-even";
+        else if ((state && state->armed) || price >= l.rearm) status = "watching";
+        else status = "after a rise to " + format_money(l.rearm, cur);
+        table << pad(symbol, 9) << pad(price > 0 ? format_money(price, cur) : "?", 11) << pad(format_money(l.floor, cur), 12)
+              << pad(format_money(l.warn, cur), 11) << status << "\n";
+        ++rows;
+    }
+    if (rows == 0) {
+        m << "You don't hold any shares, so there is nothing to protect yet. It starts by itself for what you record with `/buy`.";
+        return {true, m.str()};
+    }
+    m << "```\n" << table.str() << "```\n"
+      << "BREAK-EVEN = what you paid plus the fee: selling below it loses money. When a holding that was comfortably in "
+         "profit falls to WARN AT (about two normal days' moves above break-even), you get one warning; the next comes "
+         "only after it climbs back up, and only while the price is falling. Change the fee with `/safety fee:0.50`; "
+         "silence one stock with `/safety stock:FCX alerts:off`, or all with `/safety alerts:off`.";
+    return {true, m.str()};
+}
+
 CommandReply CommandService::buy(const std::string& user, const std::string& input, const std::string& shares_text,
                                  const std::string& paid_text) {
     std::string symbol;
@@ -652,6 +828,13 @@ CommandReply CommandService::run_text(const std::string& user, const std::string
             return words.size() < 3 ? usage("remove politician Nancy Pelosi") : remove_politician(user, rest(2));
         }
         return words.size() < 2 ? usage("remove FCX") : remove(user, arg(1));
+    }
+    if (name == "watch" || name == "alert" || name == "alerts") return watch(user, arg(1), rest(2));
+    if (name == "unwatch") return words.size() < 2 ? usage("unwatch NVDA 250") : unwatch(user, arg(1), rest(2));
+    if (name == "safety") {
+        const std::string what = to_lower(arg(1));
+        if (what == "fee") return words.size() < 3 ? usage("safety fee 0.20") : safety(user, "", rest(2));
+        return safety(user, what, "", arg(2));  // safety off, safety off NVDA
     }
     if (name == "politicians") return politicians(user, rest(1));
     if (name == "report") return words.size() < 2 ? usage("report FCX") : report(user, arg(1));

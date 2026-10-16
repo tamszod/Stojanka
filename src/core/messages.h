@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/models.h"
+#include "core/safety.h"
 
 namespace strojanka {
 
@@ -19,6 +20,16 @@ std::string peak_alert(const std::string& symbol, const std::string& company, do
                        const std::string& currency, double resistance, double strength, const StockParamsRecord& learning);
 std::string support_alert(const std::string& symbol, const std::string& company, double price, const std::string& currency,
                           double support, double strength, const StockParamsRecord& learning);
+
+// "**FCX** (Freeport-McMoRan)": the ticker, plus the short company name when it says more.
+std::string stock_label(const std::string& symbol, const std::string& company);
+
+// A /watch price alert that was reached. `held` = the user's position in it (nullptr if none).
+std::string price_alert_message(const PriceAlertRecord& alert, const std::string& company, double price,
+                                const std::string& currency, const Position* held);
+// Safety alert for a holding falling toward what it cost (below = it already fell past the floor).
+std::string safety_alert(const std::string& symbol, const std::string& company, const Position& position, double price,
+                         const std::string& currency, const SafetyLevels& levels, double fee, bool below);
 
 // Multi-line analysis report shown by /monitor and /report.
 std::string format_report(const StockReport& report);

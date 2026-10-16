@@ -107,6 +107,7 @@ public:
     void learn_news_weight();
 
     CycleStats last_cycle();
+    int poll_interval_minutes() const { return config_.poll_interval_minutes; }
 
 private:
     struct Plan {
@@ -118,6 +119,10 @@ private:
     Plan plan_cycle(bool force, int64_t now);
     bool record_plan(const Plan& plan);  // returns whether every market was closed before
     bool wait_for_next_cycle();          // false when stopping
+    // After a price check: /watch price alerts that were reached, and safety alerts for holders.
+    void check_price_alerts(const StockRecord& stock);
+    // previous_price: the price at the check before (0 = none; then the previous day's close is used).
+    void check_safety(const StockRecord& stock, double daily_vol, double previous_price);
     std::mutex& symbol_mutex(const std::string& symbol);
     void emit(const std::string& symbol, const StockReport& report, SignalSide side, double score, double cutoff,
               const std::string& leg_key, double signal_price);

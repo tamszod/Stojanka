@@ -260,6 +260,35 @@ CREATE TABLE politician_watch (
 );
 )SQL";
 
+// Version 8: price alerts (/watch), safety alerts for holdings, and per-user settings.
+const char* kMigration8 = R"SQL(
+CREATE TABLE price_alerts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id      TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    target          REAL NOT NULL,
+    direction       INTEGER NOT NULL CHECK (direction IN (1, -1)),  -- 1: rises to target, -1: falls to it
+    created_at      TEXT NOT NULL,
+    triggered_at    TEXT,
+    triggered_price REAL
+);
+CREATE INDEX idx_price_alerts_symbol ON price_alerts(symbol, triggered_at);
+CREATE INDEX idx_price_alerts_user ON price_alerts(discord_id, triggered_at);
+CREATE TABLE safety_state (
+    discord_id TEXT NOT NULL,
+    symbol     TEXT NOT NULL,
+    armed      INTEGER NOT NULL DEFAULT 0,
+    warned_at  TEXT,
+    PRIMARY KEY (discord_id, symbol)
+);
+CREATE TABLE user_settings (
+    discord_id TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    PRIMARY KEY (discord_id, key)
+);
+)SQL";
+
 }  // namespace
 
 const std::vector<Migration>& all_migrations() {
@@ -271,6 +300,7 @@ const std::vector<Migration>& all_migrations() {
         {5, "arena of paper-trading bots", kMigration5},
         {6, "trained AI models", kMigration6},
         {7, "politician stock trades and personal watchlists", kMigration7},
+        {8, "price alerts, safety alerts for holdings, user settings", kMigration8},
     };
     return migrations;
 }
