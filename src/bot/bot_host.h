@@ -36,7 +36,10 @@ public:
     bool start(std::string* error);
     void stop();
     bool running() const { return bot_ != nullptr; }
-    void wait();  // blocks until stop() is called from another thread
+    void wait();          // blocks until stop() or request_stop() is called from another thread
+    void request_stop();  // wakes wait() without tearing anything down; the waiting thread then calls stop()
+    // Records that Windows is ending the process, so the next start reports it instead of a crash.
+    void note_session_end(const std::string& reason);
 
     bool online() const;
     std::string bot_name() const;

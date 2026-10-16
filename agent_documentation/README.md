@@ -58,6 +58,7 @@ D++ forces C++20 on consumers; the whole project is C++20.
 11. **Never simulate keyboard input** (SendKeys etc.) to test the windows on the user's machine: it once typed into the user's own document.
 12. **No paid services:** no Claude/LLM APIs or per-use costs; AI runs locally on a laptop CPU (see core/ml).
 13. **Politician trade data is scraped, not guessed.** `politicians::SenateEfdClient` only parses electronic PTR filings from efdsearch.senate.gov; paper filings and the House (PDF-only) are out of scope. Test against `SenateSource` (fake in tests), never the real site.
+14. **A background thread never lets an exception escape:** wrap the loop body in `catch (const std::exception&)` *and* `catch (...)`, log, keep looping. (On MSVC an escaping exception otherwise ends the whole process; the SIGABRT handler only records it.)
 
 ## Conventions
 - Namespace `strojanka`, analysis code in `strojanka::analysis`. 4-space indent, ~120 cols, `snake_case` functions, `PascalCase` types, `kConstant`.

@@ -88,6 +88,8 @@ void ArenaService::start() {
                 tick(last_complete_date(unix_now()));
             } catch (const std::exception& e) {
                 log_error(std::string("arena failed: ") + e.what());
+            } catch (...) {
+                log_error("arena failed with an unknown error");
             }
             std::unique_lock<std::mutex> lock(loop_mutex_);
             if (loop_cv_.wait_for(lock, std::chrono::hours(1), [this] { return stopping_; })) break;

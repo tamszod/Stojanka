@@ -1,10 +1,13 @@
+#include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "bot/bot_host.h"
+#include "bot/session_watch.h"
 #include "common/config.h"
 #include "common/crash_handler.h"
 #include "common/platform.h"
@@ -208,7 +211,23 @@ int run_bot(const std::string& config_path) {
     BotHost host(config_path);
     std::string error;
     if (!host.start(&error)) return 1;
+    std::mutex done_mutex;
+    std::condition_variable done_cv;
+    bool done = false;
+    SessionWatch watch([&](const std::string& reason, bool forced) {
+        if (forced) host.note_session_end(reason);
+        host.request_stop();
+        std::unique_lock<std::mutex> lock(done_mutex);
+        if (forced) done_cv.wait_for(lock, SessionWatch::kSessionEndGrace, [&] { return done; });
+        else done_cv.wait(lock, [&] { return done; });
+    });
     host.wait();
+    host.stop();
+    {
+        std::lock_guard<std::mutex> lock(done_mutex);
+        done = true;
+    }
+    done_cv.notify_all();
     return 0;
 }
 

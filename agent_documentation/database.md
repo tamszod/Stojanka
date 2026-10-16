@@ -14,7 +14,7 @@ Location can change at runtime: `Database::move_to(new_path)` (VACUUM INTO → i
 ## Tables (v1)
 | Table | Purpose | Written by | Notes |
 |---|---|---|---|
-| `app_meta(key PK, value)` | misc metadata | migrations | `schema_migrated_at`; `arena_channel_id` (`AdminService::kPublicChannelKey` — shared public channel for arena *and* politician announcements, legacy key name kept for compatibility); `politicians_last_run` |
+| `app_meta(key PK, value)` | misc metadata | migrations | `schema_migrated_at`; `arena_channel_id` (`AdminService::kPublicChannelKey` — shared public channel for arena *and* politician announcements, legacy key name kept for compatibility); `politicians_last_run`; `run_state` / `run_started_at` (`core/run_state.h`: how the last run ended) |
 | `users(discord_id PK, notify_channel_id, created_at)` | one row per Discord user | `Repository::ensure_user` on every command | channel = fallback when DMs fail |
 | `stocks(symbol PK, name, currency, exchange, category, trend, last_price, last_price_at, support_level, resistance_level, peak_score, support_score, profile_json, history_full_refresh_at, created_at, updated_at)` | latest state per symbol (shared by all users) | `MonitorService::refresh` | `trend` ∈ increasing/decreasing/stagnating; `category` = `category_name()` text |
 | `price_history(symbol, bar_date, open, high, low, close, volume) PK(symbol,bar_date) WITHOUT ROWID` | daily adjusted bars, up to 10y | `upsert_bars` | adjusted by Yahoo adjclose; full refetch daily keeps adjustments consistent |

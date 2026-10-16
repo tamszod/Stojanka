@@ -66,6 +66,7 @@ add_library(strojanka_core STATIC
   src/core/commands.cpp
   src/core/monitor_service.cpp
   src/core/screener.cpp
+  src/core/run_state.cpp
   src/core/admin_service.cpp
   src/core/server_console.cpp
   src/core/arena/engine.cpp
@@ -103,10 +104,10 @@ function(strojanka_add_resources target name description)
 endfunction()
 
 # --- bot: Discord front-end and BotHost, shared by the headless bot and the server window ----
-add_library(strojanka_bot STATIC src/bot/discord_bot.cpp src/bot/tls_trust.cpp src/bot/bot_host.cpp)
+add_library(strojanka_bot STATIC src/bot/discord_bot.cpp src/bot/tls_trust.cpp src/bot/bot_host.cpp src/bot/session_watch.cpp)
 target_link_libraries(strojanka_bot PUBLIC strojanka_core dpp::dpp)
 if(WIN32)
-  target_link_libraries(strojanka_bot PUBLIC crypt32)
+  target_link_libraries(strojanka_bot PUBLIC crypt32 user32)
 endif()
 
 # Headless bot and command-line tools.

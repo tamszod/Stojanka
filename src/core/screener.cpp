@@ -160,20 +160,20 @@ void Screener::start() {
     cancel_ = false;
     thread_ = std::thread([this] {
         for (;;) {
-            const std::string last = repo_.meta(kLastRunKey);
-            const bool due = last.empty() || unix_now() - iso_to_unix(last) > kRescreenSeconds;
             bool requested = false;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 requested = requested_;
                 requested_ = false;
             }
-            if (due || requested) {
-                try {
-                    run_now();
-                } catch (const std::exception& e) {
-                    log_error(std::string("screener failed: ") + e.what());
-                }
+            try {
+                const std::string last = repo_.meta(kLastRunKey);
+                const bool due = last.empty() || unix_now() - iso_to_unix(last) > kRescreenSeconds;
+                if (due || requested) run_now();
+            } catch (const std::exception& e) {
+                log_error(std::string("screener failed: ") + e.what());
+            } catch (...) {
+                log_error("screener failed with an unknown error");
             }
             std::unique_lock<std::mutex> lock(mutex_);
             if (cv_.wait_for(lock, std::chrono::hours(1), [this] { return stopping_ || requested_; }) && stopping_) break;

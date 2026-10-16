@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "bot/bot_host.h"
+#include "bot/session_watch.h"
 #include "common/crash_handler.h"
 #include "common/platform.h"
 #include "common/strings.h"
@@ -126,6 +127,14 @@ int main(int argc, char** argv) {
         host.stop();
         phase = 0;
     };
+    // The window itself has no Ctrl+C; this is for Windows shutting down, restarting or updating.
+    SessionWatch watch([&](const std::string& reason, bool forced) {
+        if (forced) {
+            std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
+            if (lock.owns_lock()) host.note_session_end(reason);
+        }
+        lifecycle.submit(stop_bot).wait_for(SessionWatch::kSessionEndGrace);
+    });
 
     try {
         webview::webview w(false, nullptr);

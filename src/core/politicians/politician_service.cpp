@@ -28,13 +28,13 @@ void PoliticianService::start() {
     stopping_ = false;
     thread_ = std::thread([this] {
         for (;;) {
-            const std::string last = repo_.meta(kLastRunKey);
-            if (last.empty() || unix_now() - iso_to_unix(last) >= kCheckEverySeconds) {
-                try {
-                    tick();
-                } catch (const std::exception& e) {
-                    log_error(std::string("politicians failed: ") + e.what());
-                }
+            try {
+                const std::string last = repo_.meta(kLastRunKey);
+                if (last.empty() || unix_now() - iso_to_unix(last) >= kCheckEverySeconds) tick();
+            } catch (const std::exception& e) {
+                log_error(std::string("politicians failed: ") + e.what());
+            } catch (...) {
+                log_error("politicians failed with an unknown error");
             }
             std::unique_lock<std::mutex> lock(loop_mutex_);
             if (loop_cv_.wait_for(lock, std::chrono::hours(1), [this] { return stopping_; })) break;

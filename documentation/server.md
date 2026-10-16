@@ -57,3 +57,30 @@ On a server, or to start the bot from a script, use `start_strojanka.bat` (Windo
 
 Only one copy can run at a time. If the window and a console are started together, the second
 one refuses to start and says so. Otherwise every alert would be sent twice.
+
+## If Strojanka closes by itself
+
+Open `strojanka.log` (the **Log** button, or the install folder) and look at the last lines before
+the gap and the first lines of the next start:
+
+- **A reason before the gap**, such as *Windows is shutting down or restarting: stopping
+  Strojanka* or *an installer or Windows Update asked running programs to close*: it didn't crash,
+  Windows ended it. Windows Update restarts at night unless you set **active hours** or pause
+  updates. The bot doesn't start again by itself after a restart.
+- **`the computer is going to sleep`**: nothing runs while the computer sleeps. Change
+  **Settings > System > Power** if the bot should keep running.
+- **`CRASH:` lines**, or *the previous run … did not shut down cleanly* at the next start: it
+  crashed. Please open an issue and attach `strojanka.log`, plus `strojanka-crash.log` and
+  `strojanka-crash.dmp` from the install folder if they exist.
+
+Windows keeps its own record too. This PowerShell command lists restarts, shutdowns and
+Strojanka crashes from the last week (it only reads):
+
+```powershell
+$since = (Get-Date).AddDays(-7)
+Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,1074,6005,6006,6008; StartTime=$since} -ErrorAction SilentlyContinue | Format-Table TimeCreated, Id, Message -Wrap
+Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001,1002; StartTime=$since} -ErrorAction SilentlyContinue | Where-Object Message -match 'strojanka' | Format-Table TimeCreated, Id, Message -Wrap
+```
+
+ID 1074 is a restart or shutdown and who asked for it (`TrustedInstaller.exe` = Windows Update),
+41 or 6008 an unexpected power loss, and 1000 to 1002 a crash or hang of Strojanka.

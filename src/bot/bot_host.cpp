@@ -4,10 +4,13 @@
 
 #include "bot/discord_bot.h"
 #include "bot/tls_trust.h"
+#include "common/crash_handler.h"
+#include "common/platform.h"
 #include "common/strings.h"
 #include "common/utf8_path.h"
 #include "core/log.h"
 #include "core/migrations.h"
+#include "core/run_state.h"
 #include "core/version.h"
 
 namespace strojanka {
@@ -15,6 +18,16 @@ namespace strojanka {
 namespace {
 
 size_t discard_body(char*, size_t size, size_t nmemb, void*) { return size * nmemb; }
+
+// A run that never reached stop() leaves no trace of why in the log; say what's known.
+void report_previous_run(Repository& repo) {
+    const int64_t boot = system_boot_unix();
+    if (boot > 0) log_info("this computer has been running since " + unix_to_iso(boot));
+    const PreviousRun prev = describe_previous_run(repo.meta(kRunStateKey), repo.meta(kRunStartedKey), boot);
+    if (prev.text.empty()) return;
+    if (prev.warn) log_warn(prev.text);
+    else log_info(prev.text);
+}
 
 }  // namespace
 
@@ -53,7 +66,11 @@ bool BotHost::start(std::string* error) {
     if (!loaded) return fail("Could not load the settings file: " + load_error);
     config_ = *loaded;
     log_set_level(parse_log_level(config_.log_level));
-    if (!config_.log_file.empty()) log_set_file(resolve_config_path(config_path_, config_.log_file));
+    if (!config_.log_file.empty()) {
+        const std::string log_path = resolve_config_path(config_path_, config_.log_file);
+        log_set_file(log_path);
+        set_crash_log_mirror(log_path);
+    }
 
     if (config_.discord_token.empty()) return fail("discord_token is empty in " + config_path_ + ". Run the installer again or edit the file.");
     const long token_status = check_discord_token(config_.discord_token);
@@ -97,20 +114,31 @@ bool BotHost::start(std::string* error) {
     console_->set_politicians(politicians_.get());
 
     log_info("Strojanka " + std::string(STROJANKA_VERSION) + " starting, database " + db_path);
+    report_previous_run(*repo_);
+    started_at_ = utc_now_iso();
+    repo_->set_meta(kRunStateKey, "running");
+    repo_->set_meta(kRunStartedKey, started_at_);
     log_info(configure_tls_trust(path_utf8(utf8_path(db_path).parent_path() / "trusted_roots.pem")));
     bot_ = std::make_unique<DiscordBot>(config_, *repo_, *monitor_, *commands_, *screener_, *admin_, *arena_, *politicians_);
     {
         std::lock_guard<std::mutex> lock(wait_mutex_);
         stop_requested_ = false;
     }
-    started_at_ = utc_now_iso();
     bot_->start();
     return true;
 }
 
 void BotHost::stop() {
-    if (bot_) log_info("stopping Strojanka");
+    const bool was_running = bot_ != nullptr;
+    if (was_running) log_info("stopping Strojanka");
     bot_.reset();  // disconnects and stops the monitor and screener
+    if (was_running && repo_) {
+        try {
+            repo_->set_meta(kRunStateKey, "stopped");
+        } catch (const std::exception& e) {
+            log_warn(std::string("could not record the clean stop: ") + e.what());
+        }
+    }
     console_.reset();
     politicians_.reset();
     senate_.reset();
@@ -126,6 +154,7 @@ void BotHost::stop() {
     db_.reset();
     lock_.reset();
     started_at_.clear();
+    if (was_running) log_info("Strojanka stopped");
     {
         std::lock_guard<std::mutex> lock(wait_mutex_);
         stop_requested_ = true;
@@ -136,6 +165,23 @@ void BotHost::stop() {
 void BotHost::wait() {
     std::unique_lock<std::mutex> lock(wait_mutex_);
     wait_cv_.wait(lock, [this] { return stop_requested_; });
+}
+
+void BotHost::request_stop() {
+    {
+        std::lock_guard<std::mutex> lock(wait_mutex_);
+        stop_requested_ = true;
+    }
+    wait_cv_.notify_all();
+}
+
+void BotHost::note_session_end(const std::string& reason) {
+    if (!repo_) return;
+    try {
+        repo_->set_meta(kRunStateKey, "ended: " + reason);
+    } catch (const std::exception& e) {
+        log_warn(std::string("could not record why the program is ending: ") + e.what());
+    }
 }
 
 bool BotHost::online() const { return bot_ && bot_->online(); }

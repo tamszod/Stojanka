@@ -49,6 +49,8 @@ void MonitorService::start() {
                 run_cycle();
             } catch (const std::exception& e) {
                 log_error(std::string("monitor cycle failed: ") + e.what());
+            } catch (...) {
+                log_error("monitor cycle failed with an unknown error");
             }
             std::unique_lock<std::mutex> lock(loop_mutex_);
             if (loop_cv_.wait_for(lock, std::chrono::minutes(config_.poll_interval_minutes), [this] { return stopping_; })) {

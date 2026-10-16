@@ -26,6 +26,7 @@
 #include "core/monitor_service.h"
 #include "core/portfolio.h"
 #include "core/repository.h"
+#include "core/run_state.h"
 #include "common/instance_lock.h"
 #include "core/admin_service.h"
 #include "core/arena/arena_service.h"
@@ -1161,6 +1162,28 @@ void test_payload(const fs::path& dir) {
     CHECK(text == "# doc");
 }
 
+void test_previous_run() {
+    const int64_t started = iso_to_unix("2026-10-15T07:07:21Z");
+    // Clean stop, or a first start ever: nothing to say.
+    CHECK(describe_previous_run("stopped", "2026-10-15T07:07:21Z", started - 3600).text.empty());
+    CHECK(describe_previous_run("", "", 0).text.empty());
+    // Windows announced the end: reported, not a warning.
+    auto ended = describe_previous_run("ended: Windows is shutting down or restarting", "2026-10-15T07:07:21Z", started + 60);
+    CHECK(!ended.warn);
+    CHECK(ended.text.find("Windows is shutting down or restarting") != std::string::npos);
+    // Never reached stop(), same boot: unexplained -> warning, no restart claim.
+    auto crashed = describe_previous_run("running", "2026-10-15T07:07:21Z", started - 3600);
+    CHECK(crashed.warn);
+    CHECK(crashed.text.find("did not shut down cleanly") != std::string::npos);
+    CHECK(crashed.text.find("restarted") == std::string::npos);
+    // Never reached stop() and the computer rebooted later: still a warning, the reboot is stated as a fact.
+    auto rebooted = describe_previous_run("running", "2026-10-15T07:07:21Z", started + 5 * 3600);
+    CHECK(rebooted.warn);
+    CHECK(rebooted.text.find("restarted since then (at 2026-10-15T12:07:21Z)") != std::string::npos);
+    // Boot time unknown: no restart claim.
+    CHECK(describe_previous_run("running", "2026-10-15T07:07:21Z", 0).text.find("restarted") == std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -1189,6 +1212,7 @@ int main() {
         {"politician service: fetch, dedup, announce, DM", [&] { test_politician_service(dir); }},
         {"politician commands: monitor/remove/list", [&] { test_politician_commands(dir); }},
         {"payload", [&] { test_payload(dir); }},
+        {"previous run: clean, ended by Windows, crashed", test_previous_run},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

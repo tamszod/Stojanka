@@ -1,6 +1,7 @@
 #include "common/platform.h"
 #include "common/utf8_path.h"
 
+#include <ctime>
 #include <filesystem>
 #include <vector>
 
@@ -8,8 +9,11 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
 #include <cstdint>
 #else
+#include <sys/sysinfo.h>
 #include <unistd.h>
 #endif
 
@@ -42,6 +46,24 @@ void enable_utf8_console() {
 #if defined(_WIN32)
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+#endif
+}
+
+int64_t system_boot_unix() {
+    const auto now = static_cast<int64_t>(std::time(nullptr));
+#if defined(_WIN32)
+    // Counts time asleep too, like the boot time Windows itself reports.
+    return now - static_cast<int64_t>(GetTickCount64() / 1000);
+#elif defined(__APPLE__)
+    timeval boot{};
+    size_t size = sizeof boot;
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    if (sysctl(mib, 2, &boot, &size, nullptr, 0) != 0) return 0;
+    return static_cast<int64_t>(boot.tv_sec);
+#else
+    struct sysinfo info {};
+    if (sysinfo(&info) != 0) return 0;
+    return now - static_cast<int64_t>(info.uptime);
 #endif
 }
 
