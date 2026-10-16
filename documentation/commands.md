@@ -83,7 +83,7 @@ Records a sale. `received` is the **total** amount you got. The reply shows the 
 sale. You cannot sell more shares than you have recorded.
 
 ## /status
-Your watch list: price, trend (increasing, decreasing or stagnating over about a month), shares
+Your watch list: company, price, trend (increasing, decreasing or stagnating over about a month), shares
 held, their current value, and profit or loss on them. The last line is your **balance**: the
 current value of all your shares, what you paid for them, and the difference.
 

@@ -23,7 +23,10 @@ constexpr size_t kFullHistoryBars = 1500;
 constexpr int kLoadBars = 2600;
 constexpr const char* kWeekKey = "arena_week";
 
-std::string pad(const std::string& s, size_t width) { return s.size() >= width ? s + " " : s + std::string(width - s.size(), ' '); }
+std::string pad(const std::string& s, size_t width) {
+    const size_t chars = utf8_length(s);
+    return chars >= width ? s + " " : s + std::string(width - chars, ' ');
+}
 
 std::string signed_percent(double v) { return (v >= 0 ? "+" : "") + format_percent(v, 1); }
 

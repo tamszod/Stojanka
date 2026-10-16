@@ -64,6 +64,8 @@
   td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); white-space: nowrap; }
   td.sym { font-weight: 700; }
   td.name { color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+  td.sym .company { display: block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+  td.alert { white-space: normal; }
   .t-increasing { color: var(--ok); } .t-decreasing { color: var(--bad); } .t-stagnating { color: var(--muted); }
   .empty { color: var(--muted); padding: 18px 14px; }
   .chips button { font-size: 11px; padding: 3px 9px; border-color: var(--line); background: transparent; color: var(--muted); }
@@ -229,9 +231,9 @@ async function refreshStocks() {
   try { rows = await window.serverStocks(); } catch (e) { return; }
   $('stocks-empty').hidden = rows.length > 0;
   $('stocks-count').textContent = rows.length ? rows.length + ' stocks' : '';
-  $('stocks').innerHTML = rows.map(r => `<tr><td class="sym" title="${esc(r.name)}">${esc(r.symbol)}</td>
+  $('stocks').innerHTML = rows.map(r => `<tr><td class="sym" title="${esc(r.name)}">${esc(r.symbol)}<span class="company">${esc(r.short_name || r.name || '')}</span></td>
     <td>${r.price ? esc(r.price_text) : '–'}</td><td class="t-${esc(r.trend)}">${esc(r.trend || '–')}</td>
-    <td>${r.watchers}</td><td>${esc(r.last_signal || '–')}</td></tr>`).join('');
+    <td>${r.watchers}</td><td class="alert">${esc(r.last_signal || '–')}</td></tr>`).join('');
 }
 
 function pct(v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%'; }

@@ -31,8 +31,7 @@ bool parse_symbol(const std::string& input, std::string& symbol, CommandReply& e
 
 // Pads to a width in characters, not bytes, so columns with € or £ line up.
 std::string pad(const std::string& s, size_t width) {
-    size_t chars = 0;
-    for (unsigned char c : s) chars += (c & 0xC0) != 0x80;
+    const size_t chars = utf8_length(s);
     return chars >= width ? s : s + std::string(width - chars, ' ');
 }
 
@@ -102,14 +101,17 @@ CommandReply CommandService::status(const std::string& user) {
     std::ostringstream table;
     std::map<std::string, std::pair<double, double>> totals;  // currency -> (value, cost)
     std::string currency = "USD";
-    table << pad("STOCK", 9) << pad("PRICE", 12) << pad("TREND", 12) << pad("SHARES", 14) << pad("VALUE", 12) << "P/L\n";
+    table << pad("STOCK", 9) << pad("COMPANY", 15) << pad("PRICE", 12) << pad("TREND", 12) << pad("SHARES", 14)
+          << pad("VALUE", 12) << "P/L\n";
     for (const auto& sym : symbols) {
         const auto stock = repo_.get_stock(sym);
         const Position pos = compute_position(repo_.transactions(user, sym));
         const double price = stock ? stock->last_price : 0;
         const std::string cur = stock ? stock->currency : "USD";
         currency = cur;
-        table << pad(sym, 9) << pad(stock ? format_money(price, cur) : "?", 12) << pad(stock ? stock->trend : "?", 12);
+        const std::string company = stock && !stock->name.empty() ? short_company_name(stock->name, 14) : "-";
+        table << pad(sym, 9) << pad(company, 15) << pad(stock ? format_money(price, cur) : "?", 12)
+              << pad(stock ? stock->trend : "?", 12);
         if (pos.has_shares()) {
             const double value = pos.market_value(price);
             totals[cur].first += value;

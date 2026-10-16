@@ -3,6 +3,14 @@
 All notable changes to Strojanka are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 
+## [0.1.2] - Unreleased
+
+### Changed
+- Watched-stock tables show the company name with the ticker, shortened for display ("NVIDIA" for NVIDIA Corporation, "JPMorgan Chase" for JPMorgan Chase & Co.): under the ticker in the server window's Watched stocks tab (full name on hover), and as a column in the console's `stocks` command and in `/status` in Discord. Long alerts in the server table wrap instead of being cut off.
+
+### Fixed
+- The console's `stocks` table and the arena tables were misaligned for euro and pound amounts (padding counted bytes).
+
 ## [0.1.1] - 2026-10-14
 
 ### Added

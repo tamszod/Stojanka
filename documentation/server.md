@@ -14,8 +14,8 @@ as soon as the window opens, and stops when you close it.
 - **Cards:** users, watched stocks, alerts sent, stored news headlines and the current news
   weight, database size and location, free disk space (the bar turns amber, then red, as space
   runs low), and when prices were last checked.
-- **Watched stocks** (Ctrl+1): every stock any user watches, with price, trend, number of watchers
-  and the last alert.
+- **Watched stocks** (Ctrl+1): every stock any user watches, with its company name under the
+  ticker (hover for the full name), price, trend, number of watchers and the last alert.
 - **Arena** (Ctrl+2): every trading bot with its stage (training, proving, public), its $1,000
   portfolio's value, its return and its lead or lag compared with Atlas, its trades, and its test
   on old prices. Click a bot for its details. See [the arena guide](arena.md).
@@ -32,7 +32,7 @@ without being a Discord admin.
 |---|---|
 | `help` | Lists the commands |
 | `status` | The admin panel: database, disk space, users, last price check, admins |
-| `stocks` | Watched stocks with price, trend, watchers and last alert |
+| `stocks` | Watched stocks with company, price, trend, watchers and last alert |
 | `users` | Discord users: how many stocks each watches and holds, and who is an admin |
 | `check` | Runs a price check for all watched stocks now |
 | `screen` | Re-runs the `suggest` screener now (about 15–30 seconds) |

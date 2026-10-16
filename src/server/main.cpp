@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
             std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
             if (!lock.owns_lock() || !host.running()) return rows.dump();
             for (const auto& r : host.console().watched_stocks()) {
-                rows.push_back({{"symbol", r.symbol}, {"name", r.name}, {"price", r.price},
+                rows.push_back({{"symbol", r.symbol}, {"name", r.name}, {"short_name", short_company_name(r.name)}, {"price", r.price},
                                 {"price_text", format_money(r.price, r.currency)}, {"trend", r.trend},
                                 {"category", r.category}, {"watchers", r.watchers}, {"last_signal", r.last_signal}});
             }

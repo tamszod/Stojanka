@@ -1,7 +1,7 @@
 ﻿# Strojanka â€” agent orientation (start here)
 
 Discord bot (C++20, CMake, vcpkg) that watches stocks per Discord user, sends PEAK (sell) /
-SUPPORT (buy) DMs, tracks buys/sells with average-cost profit. Version in `/VERSION` (0.1.1).
+SUPPORT (buy) DMs, tracks buys/sells with average-cost profit. Version in `/VERSION` (0.1.2, unreleased; 0.1.1 is the latest release).
 SQLite single file, versioned migrations. Self-extracting installer for Windows/macOS.
 
 Read next, as needed:
@@ -53,7 +53,7 @@ D++ forces C++20 on consumers; the whole project is C++20.
 7. Alert wording first sentences are fixed by the spec: "`<SYM>` has reached PEAK. You have `<N>` shares. It is time to sell." / "`<SYM>` has reached SUPPORT level. It is time to buy." (`src/core/messages.cpp`).
 8. Accuracy shown to users must be **out-of-sample** (walk-forward) with the random-day baseline beside it; never in-sample calibration numbers.
 
-9. **Version stays 0.1.1** until the user explicitly allows a further bump; new features go under a new CHANGELOG section only once that's allowed. (Schema versions are separate and do increase.)
+9. **Version is 0.1.2 (in progress, "Unreleased" in CHANGELOG)**; don't publish a release or bump further until the user says so. New work goes under the 0.1.2 section. (Schema versions are separate and do increase.)
 10. **Arena bots never see the future:** `arena::step` fills orders at the *next* day's open; the test `arena engine: accounting, no look-ahead` must keep passing. Arena results reach Discord only for `public` bots.
 11. **Never simulate keyboard input** (SendKeys etc.) to test the windows on the user's machine: it once typed into the user's own document.
 12. **No paid services:** no Claude/LLM APIs or per-use costs; AI runs locally on a laptop CPU (see core/ml).

@@ -1163,6 +1163,25 @@ void test_payload(const fs::path& dir) {
     CHECK(text == "# doc");
 }
 
+void test_company_names() {
+    CHECK(short_company_name("NVIDIA Corporation") == "NVIDIA");
+    CHECK(short_company_name("Apple Inc.") == "Apple");
+    CHECK(short_company_name("JPMorgan Chase & Co.") == "JPMorgan Chase");
+    CHECK(short_company_name("The Coca-Cola Company") == "Coca-Cola");
+    CHECK(short_company_name("Cisco Systems, Inc.") == "Cisco Systems");
+    CHECK(short_company_name("Freeport-McMoRan Inc.") == "Freeport-McMoRan");
+    CHECK(short_company_name("Volkswagen AG") == "Volkswagen");
+    CHECK(short_company_name("Soci\xC3\xA9t\xC3\xA9 G\xC3\xA9n\xC3\xA9rale S.A.") == "Soci\xC3\xA9t\xC3\xA9 G\xC3\xA9n\xC3\xA9rale");
+    CHECK(short_company_name("The Trade Desk") == "The Trade Desk");  // nothing to drop, so "The" stays
+    CHECK(short_company_name("Inc.") == "Inc.");                      // never shortened to nothing
+    CHECK(short_company_name("  SPDR S&P 500 ETF Trust ") == "SPDR S&P 500 ETF Trust");
+    const std::string etf = short_company_name("iShares Core S&P 500 UCITS ETF USD (Acc)", 14);
+    CHECK(etf == "iShares Core\xE2\x80\xA6");
+    CHECK(utf8_length(etf) <= 14);
+    CHECK(short_company_name("NVIDIA Corporation", 14) == "NVIDIA");
+    CHECK(utf8_length("\xE2\x82\xAC" "1") == 2);
+}
+
 void test_previous_run() {
     const int64_t started = iso_to_unix("2026-10-15T07:07:21Z");
     // Clean stop, or a first start ever: nothing to say.
@@ -1291,6 +1310,8 @@ void test_etfs(const fs::path& dir) {
     const auto txs = repo.transactions("u1", "SXR8.DE");
     CHECK(txs.size() == 1 && std::fabs(txs[0].total - 1400.0) < 1e-9);
     const auto status = cmd.status("u1");
+    CHECK(status.text.find("COMPANY") != std::string::npos);
+    CHECK(status.text.find("SXR8.DE fund") != std::string::npos);  // the fake provider's company name
     CHECK(status.text.find("per currency") != std::string::npos);
     CHECK(status.text.find("- EUR: \xE2\x82\xAC") != std::string::npos);
     CHECK(status.text.find("- USD: $") != std::string::npos);
@@ -1436,6 +1457,7 @@ int main() {
         {"previous run: clean, ended by Windows, crashed", test_previous_run},
         {"ETFs: pence, search, European amounts, currencies", [&] { test_etfs(dir); }},
         {"portfolio and trading history", [&] { test_portfolio_and_history(dir); }},
+        {"short company names", test_company_names},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

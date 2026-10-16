@@ -196,6 +196,45 @@ int64_t iso_to_unix(const std::string& iso) {
 
 std::string normalize_symbol(const std::string& s) { return to_upper(trim(s)); }
 
+size_t utf8_length(const std::string& s) {
+    size_t n = 0;
+    for (unsigned char c : s) n += (c & 0xC0) != 0x80;
+    return n;
+}
+
+std::string short_company_name(const std::string& full, size_t max_chars) {
+    // Longest first, so " Corp." isn't left behind by " Corp" etc. Matched case-insensitively at the end.
+    static const char* const kEndings[] = {" incorporated", " corporation", " & co.", " & co", " company", " limited",
+                                           " corp.", " corp", " inc.", " inc", " co.", " plc", " ltd.", " ltd",
+                                           " n.v.", " s.a.", " ag", " se", " nv", " sa"};
+    std::string name = trim(full);
+    for (bool changed = true; changed;) {
+        changed = false;
+        while (!name.empty() && (name.back() == ',' || name.back() == ' ')) name.pop_back();
+        const std::string lower = to_lower(name);
+        for (const char* ending : kEndings) {
+            const std::string e = ending;
+            if (lower.size() > e.size() + 1 && lower.compare(lower.size() - e.size(), e.size(), e) == 0) {
+                name.erase(name.size() - e.size());
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (name.size() > 4 && to_lower(name.substr(0, 4)) == "the " && name != trim(full)) name.erase(0, 4);
+    if (name.empty()) name = trim(full);
+    if (max_chars == 0 || utf8_length(name) <= max_chars) return name;
+    std::string cut;
+    size_t chars = 0;
+    for (size_t i = 0; i < name.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if ((c & 0xC0) != 0x80 && ++chars > max_chars - 1) break;
+        cut.push_back(name[i]);
+    }
+    while (!cut.empty() && cut.back() == ' ') cut.pop_back();
+    return cut + "\xE2\x80\xA6";
+}
+
 bool is_valid_symbol(const std::string& symbol) {
     if (symbol.empty() || symbol.size() > 15) return false;
     for (char c : symbol) {

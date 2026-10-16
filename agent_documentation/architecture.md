@@ -62,7 +62,7 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 ### src/common (std only; compiled into core AND installer/packer)
 | File | Key symbols |
 |---|---|
-| strings.h/.cpp | `trim`, `to_upper`, `parse_amount` ("59.78$", "$1,234.5", "12,5"), `format_money`, `format_signed_money`, `format_shares` (â‰¤9 dp), `format_percent`, `utc_now_iso`, `unix_to_date`, `iso_to_unix` (own civil-date math, no timegm), `normalize_symbol`, `is_valid_symbol` |
+| strings.h/.cpp | `trim`, `to_upper`, `parse_amount` ("59.78$", "$1,234.5", "12,5"), `format_money`, `format_signed_money`, `format_shares` (â‰¤9 dp), `format_percent`, `utc_now_iso`, `unix_to_date`, `iso_to_unix` (own civil-date math, no timegm), `normalize_symbol`, `is_valid_symbol`, `short_company_name(name, max_chars)` (drops Inc./Corporation/plc/AG/"& Co."…, a leading "The" only when something was dropped; truncates with "…"), `utf8_length` (use it for table padding: € is 3 bytes) |
 | config.h/.cpp | `Config` (discord_token, guild_id, database_path, poll_interval_minutes, max_parallel_fetches, log_file, log_level, installed_version), `load_config` (unknown keys ignored), `save_config` (chmod 600 on POSIX), `resolve_config_path` |
 | payload.h/.cpp | installer container format (`STRJPAK1` footer, FNV-1a 64 per file), `pack`, `read_index`, `extract` (writes `.part` then rename; refuses `..`) |
 | platform.h/.cpp | `executable_path` (GetModuleFileNameW / _NSGetExecutablePath / /proc), `executable_dir`, `enable_utf8_console` |

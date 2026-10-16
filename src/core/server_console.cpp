@@ -19,7 +19,10 @@ std::vector<std::string> words_of(const std::string& line) {
     return out;
 }
 
-std::string pad(const std::string& s, size_t width) { return s.size() >= width ? s + " " : s + std::string(width - s.size(), ' '); }
+std::string pad(const std::string& s, size_t width) {
+    const size_t chars = utf8_length(s);  // € and £ are several bytes
+    return chars >= width ? s + " " : s + std::string(width - chars, ' ');
+}
 
 }  // namespace
 
@@ -80,9 +83,11 @@ std::string ServerConsole::stocks() {
     const auto rows = watched_stocks();
     if (rows.empty()) return "No stocks are being watched yet.";
     std::ostringstream m;
-    m << "**Watched stocks**\n```\n" << pad("STOCK", 8) << pad("PRICE", 12) << pad("TREND", 12) << pad("WATCHERS", 10) << "LAST ALERT\n";
+    m << "**Watched stocks**\n```\n" << pad("STOCK", 9) << pad("COMPANY", 19) << pad("PRICE", 12) << pad("TREND", 12)
+      << pad("WATCHERS", 10) << "LAST ALERT\n";
     for (const auto& r : rows) {
-        m << pad(r.symbol, 8) << pad(r.price > 0 ? format_money(r.price, r.currency) : "?", 12) << pad(r.trend, 12)
+        m << pad(r.symbol, 9) << pad(r.name.empty() ? "-" : short_company_name(r.name, 18), 19)
+          << pad(r.price > 0 ? format_money(r.price, r.currency) : "?", 12) << pad(r.trend, 12)
           << pad(std::to_string(r.watchers), 10) << (r.last_signal.empty() ? "-" : r.last_signal) << "\n";
     }
     m << "```";
