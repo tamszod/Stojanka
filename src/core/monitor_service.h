@@ -59,6 +59,9 @@ struct StockReport {
     double peak_score = 0;   // state.peak_score adjusted for news
     double support_score = 0;
     ml::Prediction pythia;   // the AI model's view (valid once it has been trained)
+    std::string instrument_type;  // "EQUITY", "ETF", ... (empty if the data source didn't say)
+
+    bool is_fund() const { return instrument_type == "ETF" || instrument_type == "MUTUALFUND"; }
 };
 
 class MonitorService {
@@ -81,6 +84,9 @@ public:
     // Fetches prices, resolves old calls, re-learns parameters when due, analyses the latest
     // bar and (if emit_signals) sends PEAK/SUPPORT alerts. Safe to call from any thread.
     std::optional<StockReport> refresh(const std::string& symbol, bool emit_signals, std::string* error);
+
+    // Stocks and ETFs matching a ticker or name, for "did you mean" replies.
+    std::vector<SymbolMatch> search_symbols(const std::string& query) { return provider_.search(query); }
 
     // Current weight of news in the scores (learned, starts at news::kDefaultNewsWeight).
     double news_weight();

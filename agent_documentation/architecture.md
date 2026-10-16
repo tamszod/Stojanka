@@ -46,12 +46,12 @@ held by each `Repository` call. `MonitorService::symbol_mutex(symbol)` serialize
 the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB lock.
 
 ### refresh(symbol) pipeline (`src/core/monitor_service.cpp`)
-1. `full = history_full_refresh_at older than 20h` â†’ fetch `TenYears`, else `Month`; `upsert_bars`.
+1. `full = history_full_refresh_at older than 20h` â†’ fetch `TenYears`, else `Month`; `upsert_bars`. If the stored `stocks.currency` is a minor unit (pre-fix GBp rows): full fetch + `replace_bars` + pending signals â†’ EXPIRED.
 2. `load_bars(symbol, 520)` (analysis window). Fewer than 30 bars â†’ error.
 3. Grade pending signals: `evaluate_outcome` from the signal's bar; resolve CORRECT/WRONG/EXPIRED.
 4. Learn: `adjust_bias` per side if something resolved; `calibrate()` if no params / full refresh / resolved / >20h. On full refresh or stale backtest: `walk_forward(load_bars(2600), 520)` â†’ `stock_params.backtest_*`, `baseline_*`.
 5. `analyze_series` on the window â†’ last `BarState`; `classify` (category), `short_term_trend`; `upsert_stock`.
-5b. News (if a `NewsProvider` was given and `stocks.news_fetched_at` > 1 h old): fetch â†’ `add_news`; then `summarize(last 72 h)`; adjusted `peak = state.peak â’ wÂ·tone`, `support = state.support + wÂ·tone` (w = `news_weight()`), stored in `StockReport.peak_score/support_score/news`. Alerts use the adjusted scores; SUPPORT is held back when the summary has red flags. `run_cycle` ends with `learn_news_weight()` (only when the graded-with-news count changed).
+5b. News (skipped entirely for funds: `ChartData::is_fund()`, summary empty, report/alerts say so; otherwise if a `NewsProvider` was given and `stocks.news_fetched_at` > 1 h old): fetch â†’ `add_news`; then `summarize(last 72 h)`; adjusted `peak = state.peak â’ wÂ·tone`, `support = state.support + wÂ·tone` (w = `news_weight()`), stored in `StockReport.peak_score/support_score/news`. Alerts use the adjusted scores; SUPPORT is held back when the summary has red flags. `run_cycle` ends with `learn_news_weight()` (only when the graded-with-news count changed).
 6. If `emit_signals`, the last bar is â‰¤5 days old and the score â‰Ą cutoff: `emit()` â†’ 3-day per-side cooldown (`has_signal_since`) â†’ `insert_signal_if_new` (UNIQUE symbol/side/leg_key) â†’ per watcher message (PEAK only to holders) â†’ `notifications` row â†’ `Notifier::send`.
 
 ## File index
@@ -79,8 +79,8 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 | repository.h/.cpp | all SQL; users, watchlist, stocks, price_history, transactions, stock_params, signals, notifications |
 | portfolio.h/.cpp | `Position` (shares, cost_basis, realized_profit, ...), `compute_position(txs)` average-cost |
 | thread_pool.h | header-only `ThreadPool::submit` â†’ `std::future` |
-| market/market_data.h | `MarketDataProvider` interface, `ChartData`, `HistoryRange {Month, TwoYears, TenYears}` |
-| market/yahoo_provider.h/.cpp | `YahooProvider` (curl, `query1.finance.yahoo.com/v8/finance/chart`), `parse_yahoo_chart` (adjclose-adjusted OHLC, null bars skipped) |
+| market/market_data.h | `MarketDataProvider` interface (`fetch`, optional `search` → `SymbolMatch{symbol,name,type,exchange}`, default empty), `ChartData` (+`instrument_type`, `is_fund()`; `currency` is always a major unit), `HistoryRange {Month, TwoYears, TenYears}`, `major_currency` (GBp/GBX→GBP, ZAc→ZAR, ILA→ILS, ÷100) |
+| market/yahoo_provider.h/.cpp | `YahooProvider` (curl, `query1.finance.yahoo.com/v8/finance/chart`; `search` = `query2.finance.yahoo.com/v1/finance/search`, EQUITY/ETF only), `parse_yahoo_chart` (adjclose-adjusted OHLC, null bars skipped, minor-unit prices ÷100, `meta.instrumentType`), `parse_yahoo_search` |
 | analysis/indicators.* | `rsi` (Wilder 14), `percent_b` (20, 2Ď), `daily_volatility`, `log_price_regression`, `median`, `smoothstep`, `clamp01` |
 | analysis/zigzag.* | online `ZigZag(reversal_pct)` (`direction()`, `pivots()`, `extreme()`), `zigzag_pivots` |
 | analysis/analyzer.* | `AnalysisParams` (+json, `peak_cutoff()`), `Indicators`, `BarState`, `analyze_series`, `evaluate_outcome` |
@@ -103,7 +103,7 @@ the same symbol (cycle vs. a user's `/monitor`). Heavy math runs outside the DB 
 | admin_service.h/.cpp | `AdminService(db, repo, monitor, config, config_path)`: `set_owners`, `is_admin`, `admins`, `handle(user, args)` (status/list/add/remove/movedb), `status_text`, `move_database(folder)` (space check â‰Ą1.5Ă—size+50MB, `db.move_to`, rewrite conf), `check_health(Notifier&)` (disk < `low_disk_warning_mb` â†’ DM all admins, 24 h throttle; `CycleStats.failed_cycles_in_a_row â‰Ą 2` â†’ outage DM, 6 h throttle). `parse_user_id`, `format_bytes`. |
 | run_state.h/.cpp | `kRunStateKey`/`kRunStartedKey` (app_meta: `running` / `stopped` / `ended: <reason>`), `describe_previous_run(state, started, boot)` → `PreviousRun{warn,text}` logged by BotHost at start |
 | command_reply.h | `CommandReply{ok,text}` (shared by commands and admin) |
-| commands.h/.cpp | `CommandService` (`help,status,profit,monitor,remove,buy,sell,report,monitor_politician,remove_politician,politicians`), `CommandReply{ok,text}`; `run_text` dispatches `monitor politician <name>` / `remove politician <name>` / `politicians <name filter>` |
+| commands.h/.cpp | `CommandService` (`help,status,profit,monitor,remove,buy,sell,report,monitor_politician,remove_politician,politicians`), `CommandReply{ok,text}`; `run_text` dispatches `monitor politician <name>` / `remove politician <name>` / `politicians <name filter>`; `lookup_failed` adds "did you mean" matches (≤5, via `MonitorService::search_symbols`) when the error says not found; `/status` and `/profit` total per currency (no FX conversion) |
 
 ### src/bot
 | File | Key symbols |

@@ -62,9 +62,17 @@ std::optional<double> parse_amount(const std::string& text) {
 
     const auto commas = std::count(kept.begin(), kept.end(), ',');
     const auto dots = std::count(kept.begin(), kept.end(), '.');
-    if (commas == 1 && dots == 0) {
+    if (commas == 1 && dots > 0 && kept.rfind(',') > kept.rfind('.')) {
+        // "1.234,50": dots group thousands, the comma is the decimal point (most of Europe).
+        kept.erase(std::remove(kept.begin(), kept.end(), '.'), kept.end());
+        kept[kept.find(',')] = '.';
+    } else if (commas == 1 && dots == 0) {
+        // "12,5" or "0,858291457" is a decimal comma; only "1,234" (three digits after, not "0,") groups thousands.
         const auto pos = kept.find(',');
-        if (kept.size() - pos - 1 <= 2) kept[pos] = '.';
+        const std::string before = kept.substr(0, pos);
+        const bool thousands = kept.size() - pos - 1 == 3 && before != "0" && before != "-0" && before != "+0" &&
+                               !before.empty() && before != "-" && before != "+";
+        if (!thousands) kept[pos] = '.';
     }
     kept.erase(std::remove(kept.begin(), kept.end(), ','), kept.end());
     if (std::count(kept.begin(), kept.end(), '.') > 1) return std::nullopt;

@@ -116,14 +116,10 @@ int run_analyze(const Config& config, const std::string& config_path, bool have_
     YahooProvider provider;
     news::RssNewsProvider news_provider;
     MonitorService monitor(repo, provider, config, &news_provider);
-    std::string error;
-    const auto report = monitor.refresh(normalize_symbol(symbol), false, &error);
-    if (!report) {
-        std::cerr << "Analysis failed: " << error << "\n";
-        return 1;
-    }
-    std::cout << format_report(*report) << "\n";
-    return 0;
+    CommandService commands(repo, monitor);
+    const CommandReply reply = commands.report("cli", symbol);  // same text as /report, incl. "did you mean"
+    (reply.ok ? std::cout : std::cerr) << reply.text << "\n";
+    return reply.ok ? 0 : 1;
 }
 
 // Runs one arena pass (prices, historical tests, live trading) and prints every bot.

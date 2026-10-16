@@ -10,7 +10,7 @@ You can use the commands two ways:
 
 Both do the same thing. Below, each command is shown in its slash form.
 
-Amounts can be typed as `59.78`, `59.78$`, `$59.78` or `59,78`.
+Amounts can be typed as `59.78`, `59.78$`, `$59.78`, `59,78`, `743,04€` or `1.234,50€`.
 
 ## /help
 Lists the commands and how to use them.
@@ -36,6 +36,32 @@ Honest test (re-learned monthly on past data, calls made blind):
 Compare the two percentages on each line. When the bot's number is not clearly higher than the
 random-day number, the report says **no proven edge yet**, and alerts for that stock should be
 treated as hints only.
+
+### ETFs
+ETFs work exactly like stocks: `/monitor`, `/report`, `/buy`, `/sell`, `/status`, `/profit` and the
+PEAK/SUPPORT alerts all accept them. US ETFs use their usual ticker (`SPY`, `VOO`, `QQQ`). European
+listings need the exchange ending Yahoo Finance uses:
+
+| Exchange | Ending | Example |
+|---|---|---|
+| London | `.L` | `CSPX.L`, `VUSA.L` |
+| Xetra (Germany) | `.DE` | `SXR8.DE`, `VUAA.DE` |
+| Amsterdam | `.AS` | `IWDA.AS` |
+| Milan | `.MI` | `CSSPX.MI` |
+| Paris | `.PA` | `CW8.PA` |
+
+If you leave the ending out (`/monitor stock:CSPX`), the bot lists the matching listings so you can
+pick yours, for example `CSPX.L` (London) or `CSPX.AS` (Amsterdam). Pick the one you actually bought:
+the same fund trades in different currencies on different exchanges.
+
+Notes:
+- **Prices are in the listing's currency.** Many London listings are quoted in pence; the bot converts
+  them to pounds, so type amounts in pounds too.
+- **News is not used for ETFs.** A fund moves with its whole basket, and headlines that mention it are
+  mostly about the fund company, so they would only add noise.
+- **Amounts** can be typed the European way too: `1.234,50€` is 1234.50.
+- With holdings in several currencies, `/status` and `/profit` show one total per currency. They are
+  never added together without conversion.
 
 ## /monitor politician:Pelosi
 Personally watch a politician instead of a stock: you get a direct message the next time they

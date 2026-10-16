@@ -69,7 +69,8 @@ std::string format_report(const StockReport& r) {
     std::ostringstream m;
     m << "**" << s.symbol << "**";
     if (!s.name.empty() && s.name != s.symbol) m << " - " << s.name;
-    if (!s.exchange.empty()) m << " (" << s.exchange << ")";
+    if (!s.exchange.empty()) m << " (" << s.exchange << (r.is_fund() ? ", ETF" : "") << ")";
+    else if (r.is_fund()) m << " (ETF)";
     m << "\n";
     m << "Price: " << format_money(s.last_price, s.currency) << " | trend: " << s.trend << "\n";
     m << "Category: " << category_name(r.profile.category) << "\n> " << category_description(r.profile.category) << "\n";
@@ -99,7 +100,8 @@ std::string format_report(const StockReport& r) {
     m << "- " << track_record("PEAK calls", l.backtest_peak_correct, l.backtest_peak_signals, l.baseline_peak) << "\n";
     m << "- " << track_record("SUPPORT calls", l.backtest_support_correct, l.backtest_support_signals, l.baseline_support) << "\n";
     if (r.pythia.valid) m << pythia_line(r.pythia) << "\n";
-    m << news_alert_line(r.news);
+    if (r.is_fund()) m << "News: not used for ETFs (a fund moves with its whole basket, not with headlines about it).";
+    else m << news_alert_line(r.news);
     if (r.news.headlines > 0 && r.state.valid) {
         const double moved = (r.state.direction > 0 ? r.peak_score - r.state.peak_score : r.support_score - r.state.support_score);
         if (std::fabs(moved) >= 0.005) {

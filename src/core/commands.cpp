@@ -1,6 +1,7 @@
 #include "core/commands.h"
 
 #include <algorithm>
+#include <map>
 #include <sstream>
 
 #include "common/strings.h"
@@ -21,7 +22,7 @@ CommandReply fail(const std::string& text) { return {false, text}; }
 bool parse_symbol(const std::string& input, std::string& symbol, CommandReply& error) {
     symbol = normalize_symbol(input);
     if (!is_valid_symbol(symbol)) {
-        error = fail("`" + input + "` is not a valid ticker symbol. Use symbols like `FCX`, `AAPL` or `BRK-B`.");
+        error = fail("`" + input + "` is not a valid ticker symbol. Use symbols like `FCX`, `BRK-B`, `SPY` or `CSPX.L`.");
         return false;
     }
     return true;
@@ -38,7 +39,8 @@ CommandReply CommandService::help() const {
       << "`/help` - this message\n"
       << "`/status` - your watched stocks with price, trend and how much money you have in them\n"
       << "`/profit` - profit for every stock you traded; `/profit stock:FCX` for one stock\n"
-      << "`/monitor stock:FCX` - start watching a stock (you get an analysis report)\n"
+      << "`/monitor stock:FCX` - start watching a stock or ETF (you get an analysis report). ETFs work the same: "
+      << "`SPY`, or a European listing with its exchange ending such as `CSPX.L` (London) or `SXR8.DE` (Xetra)\n"
       << "`/remove stock:FCX` - stop watching a stock (only when you hold no shares of it)\n"
       << "`/buy stock:FCX shares:0.858291457 paid:59.78$` - record a purchase; `paid` is the total you paid\n"
       << "`/sell stock:FCX shares:0.858291457 received:67.87$` - record a sale; `received` is the total you got\n"
@@ -64,25 +66,46 @@ bool CommandService::ensure_stock(const std::string& symbol, std::string* report
     return true;
 }
 
+CommandReply CommandService::lookup_failed(const std::string& intro, const std::string& symbol, const std::string& error,
+                                           const std::string& example_command) {
+    std::string text = intro + ": " + error;
+    if (error.find("not found") == std::string::npos && error.find("No data found") == std::string::npos) return fail(text);
+    std::vector<SymbolMatch> matches;
+    for (auto& m : monitor_.search_symbols(symbol)) {
+        if (m.symbol != symbol) matches.push_back(std::move(m));
+        if (matches.size() == 5) break;
+    }
+    if (matches.empty()) return fail(text + ".");
+    text += ". Did you mean one of these?\n";
+    for (const auto& m : matches) {
+        text += "- `" + m.symbol + "` " + m.name + " (" + (m.type == "ETF" ? "ETF" : "stock");
+        if (!m.exchange.empty()) text += ", " + m.exchange;
+        text += ")\n";
+    }
+    text += "Use the exact symbol, for example `" + example_command + matches.front().symbol +
+            "` (listings outside the US end in their exchange, like `.L` for London or `.DE` for Xetra).";
+    return fail(text);
+}
+
 CommandReply CommandService::status(const std::string& user) {
     const auto symbols = repo_.user_watchlist(user);
     if (symbols.empty()) return {true, "You are not watching any stocks yet. Start with `/monitor stock:FCX`."};
 
     std::ostringstream table;
-    double total_value = 0, total_cost = 0;
+    std::map<std::string, std::pair<double, double>> totals;  // currency -> (value, cost)
     std::string currency = "USD";
-    table << pad("STOCK", 8) << pad("PRICE", 12) << pad("TREND", 12) << pad("SHARES", 14) << pad("VALUE", 12) << "P/L\n";
+    table << pad("STOCK", 9) << pad("PRICE", 12) << pad("TREND", 12) << pad("SHARES", 14) << pad("VALUE", 12) << "P/L\n";
     for (const auto& sym : symbols) {
         const auto stock = repo_.get_stock(sym);
         const Position pos = compute_position(repo_.transactions(user, sym));
         const double price = stock ? stock->last_price : 0;
         const std::string cur = stock ? stock->currency : "USD";
         currency = cur;
-        table << pad(sym, 8) << pad(stock ? format_money(price, cur) : "?", 12) << pad(stock ? stock->trend : "?", 12);
+        table << pad(sym, 9) << pad(stock ? format_money(price, cur) : "?", 12) << pad(stock ? stock->trend : "?", 12);
         if (pos.has_shares()) {
             const double value = pos.market_value(price);
-            total_value += value;
-            total_cost += pos.cost_basis;
+            totals[cur].first += value;
+            totals[cur].second += pos.cost_basis;
             table << pad(format_shares(pos.shares), 14) << pad(format_money(value, cur), 12)
                   << format_signed_money(pos.unrealized_profit(price), cur);
         } else {
@@ -90,11 +113,20 @@ CommandReply CommandService::status(const std::string& user) {
         }
         table << "\n";
     }
+    if (totals.empty()) totals[currency] = {0, 0};
+    auto balance = [](const std::string& cur, double value, double cost) {
+        return format_money(value, cur) + " invested (paid " + format_money(cost, cur) + ", unrealized " +
+               format_signed_money(value - cost, cur) + ")";
+    };
     std::ostringstream m;
-    m << "**Your watched stocks**\n```\n" << table.str() << "```\n";
-    m << "**Balance:** " << format_money(total_value, currency) << " in stocks (paid "
-      << format_money(total_cost, currency) << ", unrealized " << format_signed_money(total_value - total_cost, currency)
-      << ")";
+    m << "**Your watched stocks and ETFs**\n```\n" << table.str() << "```\n";
+    if (totals.size() == 1) {
+        const auto& [cur, t] = *totals.begin();
+        m << "**Balance:** " << balance(cur, t.first, t.second);
+    } else {
+        m << "**Balance** per currency (not converted):";
+        for (const auto& [cur, t] : totals) m << "\n- " << cur << ": " << balance(cur, t.first, t.second);
+    }
     return {true, m.str()};
 }
 
@@ -111,31 +143,35 @@ CommandReply CommandService::profit(const std::string& user, const std::string& 
     if (symbols.empty()) return {true, "You have no recorded trades yet. Record one with `/buy`."};
 
     std::ostringstream table;
-    double realized = 0, unrealized = 0;
-    std::string currency = "USD";
-    bool any = false;
-    table << pad("STOCK", 8) << pad("REALIZED", 13) << pad("UNREALIZED", 13) << "TOTAL\n";
+    std::map<std::string, std::pair<double, double>> totals;  // currency -> (realized, unrealized)
+    table << pad("STOCK", 9) << pad("REALIZED", 13) << pad("UNREALIZED", 13) << "TOTAL\n";
     for (const auto& sym : symbols) {
         const auto txs = repo_.transactions(user, sym);
         if (txs.empty()) continue;
-        any = true;
         const Position pos = compute_position(txs);
         const auto stock = repo_.get_stock(sym);
         const std::string cur = stock ? stock->currency : "USD";
-        currency = cur;
         const double u = pos.has_shares() && stock ? pos.unrealized_profit(stock->last_price) : 0;
-        realized += pos.realized_profit;
-        unrealized += u;
-        table << pad(sym, 8) << pad(format_signed_money(pos.realized_profit, cur), 13)
+        totals[cur].first += pos.realized_profit;
+        totals[cur].second += u;
+        table << pad(sym, 9) << pad(format_signed_money(pos.realized_profit, cur), 13)
               << pad(pos.has_shares() ? format_signed_money(u, cur) : "-", 13)
               << format_signed_money(pos.realized_profit + u, cur) << "\n";
     }
-    if (!any) return {true, "You have no recorded trades for " + symbols.front() + "."};
+    if (totals.empty()) return {true, "You have no recorded trades for " + symbols.front() + "."};
+    auto summary = [](const std::string& cur, double realized, double unrealized) {
+        return "**Realized:** " + format_signed_money(realized, cur) + " | **Unrealized:** " +
+               format_signed_money(unrealized, cur) + " | **Total:** " + format_signed_money(realized + unrealized, cur);
+    };
     std::ostringstream m;
-    m << "**Profit** (realized = money received from sales minus what those shares cost)\n```\n" << table.str() << "```\n"
-      << "**Realized:** " << format_signed_money(realized, currency)
-      << " | **Unrealized:** " << format_signed_money(unrealized, currency)
-      << " | **Total:** " << format_signed_money(realized + unrealized, currency);
+    m << "**Profit** (realized = money received from sales minus what those shares cost)\n```\n" << table.str() << "```\n";
+    if (totals.size() == 1) {
+        const auto& [cur, t] = *totals.begin();
+        m << summary(cur, t.first, t.second);
+    } else {
+        m << "Per currency (not converted):";
+        for (const auto& [cur, t] : totals) m << "\n- " << cur << ": " << summary(cur, t.first, t.second);
+    }
     return {true, m.str()};
 }
 
@@ -145,7 +181,7 @@ CommandReply CommandService::monitor(const std::string& user, const std::string&
     if (!parse_symbol(input, symbol, err)) return err;
     if (repo_.is_watching(user, symbol)) return {true, "You are already watching **" + symbol + "**. Use `/report stock:" + symbol + "` for details."};
     std::string report, error;
-    if (!ensure_stock(symbol, &report, &error)) return fail("Could not add **" + symbol + "**: " + error);
+    if (!ensure_stock(symbol, &report, &error)) return lookup_failed("Could not add **" + symbol + "**", symbol, error, "/monitor stock:");
     repo_.add_watch(user, symbol);
     return {true, "Now watching **" + symbol + "**. Here is the first report:\n\n" + report};
 }
@@ -175,7 +211,9 @@ CommandReply CommandService::buy(const std::string& user, const std::string& inp
     if (!paid || *paid < 0) return fail("`" + paid_text + "` is not a valid amount. Example: `59.78$`.");
 
     std::string error;
-    if (!ensure_stock(symbol, nullptr, &error)) return fail("Could not record the purchase of **" + symbol + "**: " + error);
+    if (!ensure_stock(symbol, nullptr, &error)) {
+        return lookup_failed("Could not record the purchase of **" + symbol + "**", symbol, error, "/buy stock:");
+    }
     const bool newly_watched = repo_.add_watch(user, symbol);
 
     TransactionRecord tx;
@@ -241,7 +279,11 @@ CommandReply CommandService::news(const std::string& user, const std::string& in
     if (!parse_symbol(input, symbol, err)) return err;
     std::string error;
     auto report = monitor_.refresh(symbol, false, &error);  // also fetches headlines when due
-    if (!report) return fail("Could not get news for **" + symbol + "**: " + error);
+    if (!report) return lookup_failed("Could not get news for **" + symbol + "**", symbol, error, "/news stock:");
+    if (report->is_fund()) {
+        return {true, "**" + symbol + "** is an ETF. Headlines aren't used for ETFs: a fund moves with its whole basket, "
+                      "and news that names it is mostly about the fund company."};
+    }
     const auto recent = repo_.recent_news(symbol, unix_to_iso(unix_now() - 14 * 86400), 8);
     return {true, format_news(symbol, recent, report->news, report->news_weight)};
 }
@@ -432,7 +474,7 @@ CommandReply CommandService::report(const std::string& user, const std::string& 
     CommandReply err;
     if (!parse_symbol(input, symbol, err)) return err;
     std::string text, error;
-    if (!ensure_stock(symbol, &text, &error)) return fail("Could not analyse **" + symbol + "**: " + error);
+    if (!ensure_stock(symbol, &text, &error)) return lookup_failed("Could not analyse **" + symbol + "**", symbol, error, "/report stock:");
     return {true, text};
 }
 

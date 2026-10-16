@@ -25,7 +25,7 @@ dpp::snowflake to_snowflake(const std::string& id) {
 }
 
 dpp::command_option stock_option(bool required) {
-    return dpp::command_option(dpp::co_string, "stock", "Ticker symbol, for example FCX", required);
+    return dpp::command_option(dpp::co_string, "stock", "Stock or ETF ticker, for example FCX, SPY or CSPX.L", required);
 }
 
 dpp::command_option politician_option() {

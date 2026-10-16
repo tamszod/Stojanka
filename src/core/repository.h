@@ -33,6 +33,7 @@ public:
 
     // price history
     void upsert_bars(const std::string& symbol, const std::vector<Bar>& bars);
+    void replace_bars(const std::string& symbol, const std::vector<Bar>& bars);  // drops all stored bars first
     std::vector<Bar> load_bars(const std::string& symbol, int max_bars);  // oldest first
 
     // transactions

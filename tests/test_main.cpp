@@ -5,6 +5,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -1184,6 +1185,148 @@ void test_previous_run() {
     CHECK(describe_previous_run("running", "2026-10-15T07:07:21Z", 0).text.find("restarted") == std::string::npos);
 }
 
+// Several listings with their own currency and type, a symbol search, and one unknown ticker.
+class EtfProvider : public MarketDataProvider {
+public:
+    struct Listing {
+        std::string currency, type;
+        double scale = 1;
+    };
+    std::map<std::string, Listing> listings;
+    std::vector<Bar> bars;
+    std::optional<ChartData> fetch(const std::string& symbol, HistoryRange, std::string* error) override {
+        auto it = listings.find(symbol);
+        if (it == listings.end()) {
+            if (error) *error = "symbol not found";
+            return std::nullopt;
+        }
+        ChartData d;
+        d.symbol = symbol;
+        d.name = symbol + " fund";
+        d.exchange = "LSE";
+        d.currency = it->second.currency;
+        d.instrument_type = it->second.type;
+        d.bars = bars;
+        for (auto& b : d.bars) b.open *= it->second.scale, b.high *= it->second.scale, b.low *= it->second.scale, b.close *= it->second.scale;
+        d.last_price = d.bars.back().close;
+        return d;
+    }
+    std::vector<SymbolMatch> search(const std::string& query) override {
+        if (query != "CSPX") return {};
+        return {{"CSPX.L", "iShares Core S&P 500 UCITS ETF USD (Acc)", "ETF", "London"},
+                {"CSPX.AS", "iShares Core S&P 500 UCITS ETF USD (Acc)", "ETF", "Amsterdam"}};
+    }
+};
+
+void test_etfs(const fs::path& dir) {
+    // Pence-quoted London listing: converted to pounds, ETF type kept.
+    const std::string pence = R"({"chart":{"result":[{"meta":{"currency":"GBp","symbol":"ISF.L","fullExchangeName":"LSE",
+        "instrumentType":"ETF","regularMarketPrice":1055.86,"gmtoffset":3600,"longName":"iShares Core FTSE 100 UCITS ETF"},
+        "timestamp":[1791207000,1791293400],
+        "indicators":{"quote":[{"open":[1040,1050],"high":[1060,1061],"low":[1030,1045],"close":[1050,1055.86],
+        "volume":[100,200]}],"adjclose":[{"adjclose":[1050,1055.86]}]}}],"error":null}})";
+    std::string err;
+    const auto isf = parse_yahoo_chart(pence, &err);
+    CHECK(isf.has_value());
+    if (isf) {
+        CHECK(isf->currency == "GBP");
+        CHECK(isf->is_fund());
+        CHECK_NEAR(isf->last_price, 10.5586, 1e-9);
+        CHECK(isf->bars.size() == 2);
+        if (isf->bars.size() == 2) {
+            CHECK_NEAR(isf->bars[1].close, 10.5586, 1e-9);
+            CHECK_NEAR(isf->bars[0].high, 10.60, 1e-9);
+        }
+    }
+    CHECK(major_currency("USD").second == 1.0);
+    CHECK(major_currency("ZAc").first == "ZAR");
+
+    const auto found = parse_yahoo_search(R"json({"quotes":[
+        {"symbol":"CSPX.L","quoteType":"ETF","exchDisp":"London","longname":"iShares Core S&P 500 UCITS ETF USD (Acc)"},
+        {"symbol":"XNVDA=F","quoteType":"FUTURE","exchDisp":"Chicago","shortname":"Micro NVIDIA futures"},
+        {"symbol":"NVDA","quoteType":"EQUITY","exchDisp":"NASDAQ","longname":null,"shortname":"NVIDIA Corporation"}]})json");
+    CHECK(found.size() == 2);  // the future is dropped
+    if (found.size() == 2) {
+        CHECK(found[0].symbol == "CSPX.L" && found[0].type == "ETF" && found[0].exchange == "London");
+        CHECK(found[1].name == "NVIDIA Corporation");
+    }
+    CHECK(parse_yahoo_search("not json").empty());
+
+    // European amounts.
+    CHECK_NEAR(*parse_amount("1.234,50 \xE2\x82\xAC"), 1234.5, 1e-9);
+    CHECK_NEAR(*parse_amount("743,04\xE2\x82\xAC"), 743.04, 1e-9);
+    CHECK_NEAR(*parse_amount("0,858291457"), 0.858291457, 1e-12);
+    CHECK_NEAR(*parse_amount("1,234"), 1234, 1e-9);
+    CHECK_NEAR(*parse_amount("1,2345"), 1.2345, 1e-12);
+
+    Database db(path_utf8(dir / "etf.db"));
+    migrate_database(db, false);
+    Repository repo(db);
+    EtfProvider provider;
+    provider.bars = make_bars(cyclical_closes(300, 11));
+    provider.listings = {{"CSPX.L", {"USD", "ETF"}}, {"SXR8.DE", {"EUR", "ETF"}}, {"NVDA", {"USD", "EQUITY"}},
+                         {"ISF.L", {"GBP", "ETF"}}};
+    Config config;
+    MonitorService monitor(repo, provider, config);
+    CommandService cmd(repo, monitor);
+
+    // A bare European ticker gets the matching listings instead of a dead end.
+    const auto miss = cmd.monitor("u1", "cspx");
+    CHECK(!miss.ok);
+    CHECK(miss.text.find("`CSPX.L`") != std::string::npos);
+    CHECK(miss.text.find("`CSPX.AS`") != std::string::npos);
+    CHECK(miss.text.find("/monitor stock:CSPX.L") != std::string::npos);
+    CHECK(cmd.monitor("u1", "NOPE").text.find("Did you mean") == std::string::npos);  // nothing to suggest
+
+    const auto added = cmd.monitor("u1", "CSPX.L");
+    CHECK(added.ok);
+    CHECK(added.text.find(", ETF)") != std::string::npos);
+    CHECK(added.text.find("News: not used for ETFs") != std::string::npos);
+    CHECK(cmd.news("u1", "CSPX.L").text.find("is an ETF") != std::string::npos);
+    CHECK(cmd.report("u1", "NVDA").text.find("ETF") == std::string::npos);
+
+    // Trading ETFs in two currencies: separate balances, never summed across currencies.
+    CHECK(cmd.buy("u1", "NVDA", "1", "100$").ok);
+    CHECK(cmd.buy("u1", "SXR8.DE", "2", "1.400,00 \xE2\x82\xAC").ok);
+    const auto txs = repo.transactions("u1", "SXR8.DE");
+    CHECK(txs.size() == 1 && std::fabs(txs[0].total - 1400.0) < 1e-9);
+    const auto status = cmd.status("u1");
+    CHECK(status.text.find("per currency") != std::string::npos);
+    CHECK(status.text.find("- EUR: \xE2\x82\xAC") != std::string::npos);
+    CHECK(status.text.find("- USD: $") != std::string::npos);
+    CHECK(cmd.sell("u1", "SXR8.DE", "1", "750\xE2\x82\xAC").ok);
+    CHECK(cmd.profit("u1", "").text.find("Per currency") != std::string::npos);
+    CHECK(cmd.status("u2").ok);
+
+    // A pence-era database row is reloaded in pounds, and calls priced in pence are retired.
+    StockRecord old;
+    old.symbol = "ISF.L";
+    old.currency = "GBp";
+    old.history_full_refresh_at = utc_now_iso();  // fresh, so only the currency forces the reload
+    repo.upsert_stock(old);
+    auto pence_bars = provider.bars;
+    for (auto& b : pence_bars) b.open *= 100, b.high *= 100, b.low *= 100, b.close *= 100;
+    pence_bars.insert(pence_bars.begin(), Bar{"2010-01-04", 900, 900, 900, 900, 0});  // older than any new data
+    repo.upsert_bars("ISF.L", pence_bars);
+    SignalRecord sig;
+    sig.symbol = "ISF.L";
+    sig.bar_date = pence_bars.back().date;
+    sig.price = pence_bars.back().close;
+    sig.leg_key = "x";
+    sig.horizon_bars = 20;
+    sig.move_pct = 0.02;
+    repo.insert_signal_if_new(sig);
+    std::string rerr;
+    CHECK(monitor.refresh("ISF.L", false, &rerr).has_value());
+    const auto reloaded = repo.load_bars("ISF.L", 10000);
+    double highest = 0;
+    for (const auto& b : reloaded) highest = std::max(highest, b.close);
+    CHECK(reloaded.size() == provider.bars.size());  // the 2010 pence bar is gone too
+    CHECK(highest < 200);  // pounds (around 100), not pence (around 10,000)
+    CHECK(repo.get_stock("ISF.L")->currency == "GBP");
+    CHECK(repo.pending_signals("ISF.L").empty());
+}
+
 }  // namespace
 
 int main() {
@@ -1213,6 +1356,7 @@ int main() {
         {"politician commands: monitor/remove/list", [&] { test_politician_commands(dir); }},
         {"payload", [&] { test_payload(dir); }},
         {"previous run: clean, ended by Windows, crashed", test_previous_run},
+        {"ETFs: pence, search, European amounts, currencies", [&] { test_etfs(dir); }},
     };
     for (const auto& [name, fn] : tests) {
         std::cout << "[test] " << name << "\n";

@@ -13,6 +13,7 @@ your profit.
 ## What it does
 
 - **Watches stocks for many people at once.** Each Discord user has their own watch list and their own trades.
+- **Works with ETFs too**, US ones (`SPY`) and European listings (`CSPX.L`, `SXR8.DE`), in their own currency.
 - **Checks prices regularly** (every 15 minutes by default), all stocks in parallel.
 - **Writes a report when you add a stock:** what kind of stock it is, where its support and resistance are, and how accurate the bot's calls would have been in the past.
 - **Learns each stock's behaviour.** It tunes its settings separately for every stock, re-checks them every day, and grades every alert it sent. If its alerts for a stock keep being wrong, it becomes stricter for that stock.

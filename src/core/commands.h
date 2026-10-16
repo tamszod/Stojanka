@@ -63,6 +63,10 @@ public:
 private:
     // Makes sure the stock exists in the database (downloading history the first time).
     bool ensure_stock(const std::string& symbol, std::string* report_text, std::string* error);
+    // "<intro>: <error>", plus matching listings when the ticker wasn't found (CSPX -> CSPX.L).
+    // example_command is the slash command to show with the first match, e.g. "/monitor stock:".
+    CommandReply lookup_failed(const std::string& intro, const std::string& symbol, const std::string& error,
+                               const std::string& example_command);
 
     Repository& repo_;
     MonitorService& monitor_;

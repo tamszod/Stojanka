@@ -151,6 +151,19 @@ void Repository::upsert_bars(const std::string& symbol, const std::vector<Bar>& 
     tx.commit();
 }
 
+void Repository::replace_bars(const std::string& symbol, const std::vector<Bar>& bars) {
+    SqlTransaction tx(db_);  // not nestable, so no upsert_bars() call inside
+    db_.prepare("DELETE FROM price_history WHERE symbol = ?1;").bind(1, symbol).step();
+    auto st = db_.prepare(
+        "INSERT INTO price_history(symbol, bar_date, open, high, low, close, volume) VALUES (?1,?2,?3,?4,?5,?6,?7);");
+    for (const auto& b : bars) {
+        st.reset();
+        st.bind(1, symbol).bind(2, b.date).bind(3, b.open).bind(4, b.high).bind(5, b.low).bind(6, b.close).bind(7, b.volume);
+        st.step();
+    }
+    tx.commit();
+}
+
 std::vector<Bar> Repository::load_bars(const std::string& symbol, int max_bars) {
     Lock lock(db_.mutex());
     auto st = db_.prepare(

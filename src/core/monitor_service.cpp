@@ -129,7 +129,9 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
     StockRecord stock;
     if (auto existing = repo_.get_stock(symbol)) stock = *existing;
     stock.symbol = symbol;
-    const bool full = older_than(stock.history_full_refresh_at, kFullRefreshSeconds);
+    // Stored by an older version in pence (GBp) etc.: prices now arrive in pounds, so start over.
+    const bool rescale = major_currency(stock.currency).second != 1.0;
+    const bool full = rescale || older_than(stock.history_full_refresh_at, kFullRefreshSeconds);
 
     std::string fetch_error;
     auto data = provider_.fetch(symbol, full ? HistoryRange::TenYears : HistoryRange::Month, &fetch_error);
@@ -137,7 +139,13 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
         if (error) *error = fetch_error;
         return std::nullopt;
     }
-    repo_.upsert_bars(symbol, data->bars);
+    if (rescale) {
+        log_info(symbol + ": prices were stored in " + stock.currency + ", reloading the history in " + data->currency);
+        repo_.replace_bars(symbol, data->bars);
+        for (const auto& sig : repo_.pending_signals(symbol)) repo_.resolve_signal(sig.id, SignalOutcome::Expired);
+    } else {
+        repo_.upsert_bars(symbol, data->bars);
+    }
     if (full) stock.history_full_refresh_at = utc_now_iso();
     if (!data->name.empty()) stock.name = data->name;
     if (!data->currency.empty()) stock.currency = data->currency;
@@ -205,7 +213,10 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
     const StockProfile profile = classify(bars);
 
     // 4. News: refresh headlines at most hourly, summarise the last three days, nudge the scores.
-    if (news_ && older_than(stock.news_fetched_at, kNewsRefreshSeconds)) {
+    // Not for funds: an index ETF moves with its whole basket, and headlines naming it are mostly
+    // about the fund company, which would only add noise (and could wrongly veto SUPPORT alerts).
+    const bool fund = data->is_fund();
+    if (!fund && news_ && older_than(stock.news_fetched_at, kNewsRefreshSeconds)) {
         std::string news_error;
         const int added = repo_.add_news(news_->fetch(symbol, stock.name, &news_error));
         if (!news_error.empty()) log_warn(symbol + ": " + news_error);
@@ -213,7 +224,8 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
         stock.news_fetched_at = utc_now_iso();
     }
     const int64_t now = unix_now();
-    const news::NewsSummary headlines = news::summarize(repo_.recent_news(symbol, unix_to_iso(now - 72 * 3600), 200), now);
+    const news::NewsSummary headlines =
+        fund ? news::NewsSummary{} : news::summarize(repo_.recent_news(symbol, unix_to_iso(now - 72 * 3600), 200), now);
     const double news_weight = this->news_weight();
     const double peak_score = std::clamp(last.peak_score - news_weight * headlines.sentiment, 0.0, 1.0);
     const double support_score = std::clamp(last.support_score + news_weight * headlines.sentiment, 0.0, 1.0);
@@ -240,6 +252,7 @@ std::optional<StockReport> MonitorService::refresh(const std::string& symbol, bo
     report.last_bar_date = bars.back().date;
     report.news = headlines;
     report.news_weight = news_weight;
+    report.instrument_type = data->instrument_type;
     report.peak_score = peak_score;
     report.support_score = support_score;
     if (pythia_) report.pythia = pythia_->predict(symbol, bars);
@@ -311,7 +324,7 @@ void MonitorService::emit(const std::string& symbol, const StockReport& report, 
         } else {
             message = support_alert(symbol, s.last_price, s.currency, s.support_level, score, report.learning);
         }
-        message += "\n" + news_alert_line(report.news);
+        if (!report.is_fund()) message += "\n" + news_alert_line(report.news);
         if (report.pythia.valid) message += "\n" + pythia_line(report.pythia);
         const int64_t notification_id = repo_.add_notification(signal_id, user, message);
         if (notifier_) notifier_->send(notification_id, user, message);
