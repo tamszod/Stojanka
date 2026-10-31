@@ -1,5 +1,6 @@
 #include "bot/discord_bot.h"
 
+#include "common/strings.h"
 #include "core/log.h"
 
 namespace strojanka {
@@ -8,7 +9,8 @@ namespace {
 
 constexpr size_t kDiscordMessageLimit = 2000;
 
-std::string fit_message(const std::string& text) {
+std::string fit_message(const std::string& input) {
+    const std::string text = to_valid_utf8(input);  // the library's JSON would throw on anything else
     if (text.size() <= kDiscordMessageLimit) return text;
     std::string cut = text.substr(0, kDiscordMessageLimit - 4);
     while (!cut.empty() && (static_cast<unsigned char>(cut.back()) & 0xC0) == 0x80) cut.pop_back();  // keep UTF-8 valid

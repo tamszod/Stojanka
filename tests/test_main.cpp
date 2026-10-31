@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "common/config.h"
+#include "common/json_text.h"
 #include "common/payload.h"
 #include "common/strings.h"
 #include "common/update_backup.h"
@@ -1810,6 +1811,54 @@ void test_portfolio_and_history(const fs::path& dir) {
 }
 
 
+// Issue #6: Windows' Hungarian "no such host" message, in the ANSI code page. When the network
+// dropped, this line reached the server window's log feed and json.dump() threw on a background
+// thread, which ended the whole program.
+void test_text_encoding() {
+    using nlohmann::json;
+    const std::string os_error = "Exception when reconnecting shard 0: getaddrinfo error: Nincs ilyen ismert \xE1llom\xE1s. ";
+    auto strict_ok = [](const std::string& text) {
+        try {
+            (void)json::array({text}).dump();
+            return true;
+        } catch (const json::type_error& e) {
+            return e.id != 316;
+        }
+    };
+    CHECK(!strict_ok(os_error));  // this is what crashed
+    CHECK(json_text(json::array({os_error})).find("Nincs ilyen ismert") != std::string::npos);  // never throws
+
+    const std::string clean = to_valid_utf8(os_error);
+    CHECK(strict_ok(clean));
+    CHECK(clean.find("getaddrinfo error: Nincs ilyen ismert ") != std::string::npos);
+    CHECK(clean.find("llom") != std::string::npos);
+    CHECK(clean.size() > os_error.size());
+
+    // Valid text is left alone, even next to a broken part.
+    const std::string good = "\xC3\xA1rv\xC3\xADzt\xC5\xB1r\xC5\x91 \xE2\x82\xAC \xF0\x9F\x8F\x9B\xEF\xB8\x8F plain";
+    CHECK(to_valid_utf8(good) == good);
+    CHECK(to_valid_utf8("") == "");
+    CHECK(to_valid_utf8(good + "\xE1").find(good) == 0);
+    CHECK(to_valid_utf8("\xE1" + good).find(good) != std::string::npos);
+
+    // Everything the JSON writer refuses: a character cut in half by substr(), overlong forms,
+    // surrogates, values past U+10FFFF, stray continuation bytes.
+    const std::string emoji = "\xF0\x9F\x8F\x9B";
+    const std::vector<std::string> broken = {"\xE1", "\xC3", "\xE2\x82", emoji.substr(0, 3), "\xC0\x80", "\xE0\x80\x80",
+                                             "\xED\xA0\x80", "\xF4\x90\x80\x80", "\xF5", "\x80", "\xFF\xFE", "abc\xE1"};
+    for (const auto& bad : broken) {
+        CHECK(!strict_ok(bad));
+        CHECK(strict_ok(to_valid_utf8(bad)));
+    }
+
+    // The log hands only valid text on, to the window as well.
+    std::string seen;
+    log_set_listener([&seen](LogLevel, const std::string& line) { seen = line; });
+    log_info(os_error);
+    log_set_listener({});
+    CHECK(strict_ok(seen) && seen.find("Nincs ilyen ismert") != std::string::npos);
+}
+
 void test_price_and_safety_alerts(const fs::path& dir) {
     // The safety levels and their state machine on their own.
     Position pos;
@@ -1964,6 +2013,7 @@ int main() {
     const fs::path dir = temp_dir();
     const std::vector<std::pair<const char*, std::function<void()>>> tests = {
         {"strings", test_strings},
+        {"text from Windows: valid UTF-8 everywhere (issue 6)", test_text_encoding},
         {"config", [&] { test_config(dir); }},
         {"migrations", [&] { test_migrations(dir); }},
         {"portfolio", test_portfolio},

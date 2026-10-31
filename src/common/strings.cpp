@@ -7,7 +7,79 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace strojanka {
+
+namespace {
+
+// Length of the valid UTF-8 sequence starting at s[i], 0 if there is none. Follows the Unicode
+// table of well-formed sequences: no overlong forms, surrogates or values above U+10FFFF.
+size_t utf8_sequence_length(const std::string& s, size_t i) {
+    auto byte = [&s](size_t k) { return k < s.size() ? static_cast<unsigned>(static_cast<unsigned char>(s[k])) : 0u; };
+    auto in = [](unsigned b, unsigned low, unsigned high) { return b >= low && b <= high; };
+    const unsigned b0 = byte(i), b1 = byte(i + 1), b2 = byte(i + 2), b3 = byte(i + 3);
+    const bool tail2 = in(b2, 0x80, 0xBF), tail3 = in(b3, 0x80, 0xBF);
+    if (b0 < 0x80) return 1;
+    if (in(b0, 0xC2, 0xDF)) return in(b1, 0x80, 0xBF) ? 2 : 0;
+    if (b0 == 0xE0) return in(b1, 0xA0, 0xBF) && tail2 ? 3 : 0;
+    if (b0 == 0xED) return in(b1, 0x80, 0x9F) && tail2 ? 3 : 0;
+    if (in(b0, 0xE1, 0xEF)) return in(b1, 0x80, 0xBF) && tail2 ? 3 : 0;
+    if (b0 == 0xF0) return in(b1, 0x90, 0xBF) && tail2 && tail3 ? 4 : 0;
+    if (in(b0, 0xF1, 0xF3)) return in(b1, 0x80, 0xBF) && tail2 && tail3 ? 4 : 0;
+    if (b0 == 0xF4) return in(b1, 0x80, 0x8F) && tail2 && tail3 ? 4 : 0;
+    return 0;
+}
+
+// Bytes that aren't UTF-8, as text.
+std::string decode_foreign_bytes(const std::string& bytes) {
+#if defined(_WIN32)
+    const int size = static_cast<int>(bytes.size());
+    const int wide_size = MultiByteToWideChar(CP_ACP, 0, bytes.data(), size, nullptr, 0);
+    if (wide_size > 0) {
+        std::wstring wide(static_cast<size_t>(wide_size), L'\0');
+        MultiByteToWideChar(CP_ACP, 0, bytes.data(), size, wide.data(), wide_size);
+        const int out_size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+        if (out_size > 0) {
+            std::string out(static_cast<size_t>(out_size), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, out.data(), out_size, nullptr, nullptr);
+            return out;
+        }
+    }
+#endif
+    std::string out;
+    for (size_t i = 0; i < bytes.size(); ++i) out += "\xEF\xBF\xBD";
+    return out;
+}
+
+}  // namespace
+
+std::string to_valid_utf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        const size_t n = utf8_sequence_length(s, i);
+        if (n == 0) break;
+        i += n;
+    }
+    if (i == s.size()) return s;
+
+    std::string out = s.substr(0, i);
+    while (i < s.size()) {
+        const size_t n = utf8_sequence_length(s, i);
+        if (n > 0) {
+            out.append(s, i, n);
+            i += n;
+            continue;
+        }
+        size_t end = i + 1;
+        while (end < s.size() && utf8_sequence_length(s, end) == 0) ++end;
+        out += decode_foreign_bytes(s.substr(i, end - i));
+        i = end;
+    }
+    return out;
+}
 
 std::string trim(const std::string& s) {
     size_t b = 0, e = s.size();

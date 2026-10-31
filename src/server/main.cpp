@@ -17,6 +17,7 @@
 #include "bot/bot_host.h"
 #include "bot/session_watch.h"
 #include "common/crash_handler.h"
+#include "common/json_text.h"
 #include "common/platform.h"
 #include "common/strings.h"
 #include "common/utf8_path.h"
@@ -165,7 +166,7 @@ int main(int argc, char** argv) {
         const bool ok = host.start(&error);
         {
             std::lock_guard<std::mutex> e(error_mutex);
-            last_error = ok ? "" : error;
+            last_error = ok ? "" : to_valid_utf8(error);
         }
         phase = 0;
     };
@@ -202,7 +203,7 @@ int main(int argc, char** argv) {
         ThreadPool commands(2);  // declared after `w`: finishes (and stops using it) before `w` is destroyed
 
         w.bind("serverInfo", [&](const std::string&) {
-            return json{{"version", STROJANKA_VERSION}, {"config_path", config_path}}.dump();
+            return json_text({{"version", STROJANKA_VERSION}, {"config_path", config_path}});
         });
 
         w.bind("recentLogs", [&](const std::string&) {
@@ -211,7 +212,7 @@ int main(int argc, char** argv) {
             feed.pending.clear();
             json lines = json::array();
             for (const auto& [lvl, line] : feed.recent) lines.push_back({lvl, line});
-            return lines.dump();
+            return json_text(lines);
         });
 
         w.bind("serverState", [&](const std::string&) {
@@ -223,11 +224,11 @@ int main(int argc, char** argv) {
             std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
             if (!lock.owns_lock() || phase != 0) {
                 s["state"] = phase == 2 ? "stopping" : "starting";
-                return s.dump();
+                return json_text(s);
             }
             if (!host.running()) {
                 s["state"] = s["error"].get<std::string>().empty() ? "stopped" : "error";
-                return s.dump();
+                return json_text(s);
             }
             s["state"] = host.online() ? "online" : "starting";
             s["bot_name"] = host.bot_name();
@@ -258,19 +259,19 @@ int main(int argc, char** argv) {
                 {"last_backup_at", host.admin().last_backup_at()},
                 {"last_backup_path", repo.meta("last_backup_path")},
             };
-            return s.dump();
+            return json_text(s);
         });
 
         w.bind("serverStocks", [&](const std::string&) {
             json rows = json::array();
             std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
-            if (!lock.owns_lock() || !host.running()) return rows.dump();
+            if (!lock.owns_lock() || !host.running()) return json_text(rows);
             for (const auto& r : host.console().watched_stocks()) {
                 rows.push_back({{"symbol", r.symbol}, {"name", r.name}, {"short_name", short_company_name(r.name)}, {"price", r.price},
                                 {"price_text", format_money(r.price, r.currency)}, {"trend", r.trend},
                                 {"category", r.category}, {"watchers", r.watchers}, {"last_signal", r.last_signal}});
             }
-            return rows.dump();
+            return json_text(rows);
         });
 
         w.bind("serverMarkets", [&](const std::string&) {
@@ -290,13 +291,13 @@ int main(int argc, char** argv) {
                 rows.push_back({{"name", m.name}, {"suffix", m.suffix}, {"example", m.example}, {"hours", r.hours}, {"open", r.open},
                                 {"status", r.status}, {"watched", std::find(watched.begin(), watched.end(), &m) != watched.end()}});
             }
-            return json{{"rows", rows}, {"zone", local_utc_label(now)}}.dump();
+            return json_text({{"rows", rows}, {"zone", local_utc_label(now)}});
         });
 
         w.bind("arenaBots", [&](const std::string&) {
             json rows = json::array();
             std::shared_lock<std::shared_mutex> lock(host_mutex, std::try_to_lock);
-            if (!lock.owns_lock() || !host.running()) return rows.dump();
+            if (!lock.owns_lock() || !host.running()) return json_text(rows);
             for (const auto& v : host.arena().view()) {
                 rows.push_back({{"name", v.name}, {"origin", v.origin}, {"idea", v.idea}, {"stage", v.stage},
                                 {"stage_label", v.stage_label}, {"value", v.value}, {"live_return", v.live_return},
@@ -304,7 +305,7 @@ int main(int argc, char** argv) {
                                 {"passed", v.backtest_passed}, {"verdict", v.verdict}, {"bt_cagr", v.bt_cagr},
                                 {"bt_sharpe", v.bt_sharpe}, {"bt_drawdown", v.bt_drawdown}});
             }
-            return rows.dump();
+            return json_text(rows);
         });
 
         w.bind("startBot", [&](const std::string&) {
@@ -332,12 +333,12 @@ int main(int argc, char** argv) {
                         } else {
                             log_info("console: " + line);
                             const CommandReply r = host.console().run(line);
-                            reply = {{"ok", r.ok}, {"text", r.text}};
+                            reply = {{"ok", r.ok}, {"text", to_valid_utf8(r.text)}};
                         }
                     } catch (const std::exception& e) {
-                        reply = {{"ok", false}, {"text", std::string("Error: ") + e.what()}};
+                        reply = {{"ok", false}, {"text", to_valid_utf8(std::string("Error: ") + e.what())}};
                     }
-                    w.resolve(id, 0, reply.dump());
+                    w.resolve(id, 0, json_text(reply));
                 });
             },
             nullptr);
@@ -365,10 +366,16 @@ int main(int argc, char** argv) {
                     batch.swap(feed.pending);
                 }
                 if (batch.empty() || !running) continue;
-                json lines = json::array();
-                for (const auto& [lvl, line] : batch) lines.push_back({lvl, line});
-                const std::string js = "window.__logs && window.__logs(" + lines.dump() + ")";
-                w.dispatch([&w, js] { w.eval(js); });
+                try {
+                    json lines = json::array();
+                    for (const auto& [lvl, line] : batch) lines.push_back({lvl, line});
+                    const std::string js = "window.__logs && window.__logs(" + json_text(lines) + ")";
+                    w.dispatch([&w, js] { w.eval(js); });
+                } catch (const std::exception& e) {
+                    log_warn(std::string("could not show log lines in the window: ") + e.what());
+                } catch (...) {
+                    log_warn("could not show log lines in the window");
+                }
             }
         });
 

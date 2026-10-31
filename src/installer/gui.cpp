@@ -5,6 +5,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/json_text.h"
+#include "common/strings.h"
 #include "core/version.h"
 #include "installer/installer_core.h"
 #include "installer/installer_ui.h"  // generated from ui/installer.html: kInstallerHtml
@@ -53,40 +55,38 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
         void* window = w.window().ok() ? w.window().value() : nullptr;
 
         w.bind("appInfo", [&](const std::string&) {
-            return json{{"version", STROJANKA_VERSION},
+            return json_text({{"version", STROJANKA_VERSION},
 #if defined(_WIN32)
-                        {"platform", "windows"},
+                              {"platform", "windows"},
 #else
-                        {"platform", "mac"},
+                              {"platform", "mac"},
 #endif
-                        {"dir", dir.empty() ? default_install_dir() : dir},
-                        {"start", start}}
-                .dump();
+                              {"dir", dir.empty() ? default_install_dir() : dir},
+                              {"start", start}});
         });
 
         w.bind("inspectDir", [&](const std::string& req) {
             const ExistingInstall x = inspect_install(str_arg(req, 0));
-            return json{{"found", x.found},
-                        {"has_config", x.has_config},
-                        {"version", x.version},
-                        {"database_path", x.database_path},
-                        {"database_exists", x.database_exists},
-                        {"poll", x.config.poll_interval_minutes},
-                        {"backup_email", x.config.backup_email},
-                        {"suggested", x.suggested},
-                        {"start_menu", x.start_menu_shortcut},
-                        {"desktop", x.desktop_shortcut},
-                        {"autostart", x.autostart},
-                        {"revert_version", x.revert_version},
-                        {"revert_until", x.revert_until}}
-                .dump();
+            return json_text({{"found", x.found},
+                              {"has_config", x.has_config},
+                              {"version", x.version},
+                              {"database_path", x.database_path},
+                              {"database_exists", x.database_exists},
+                              {"poll", x.config.poll_interval_minutes},
+                              {"backup_email", x.config.backup_email},
+                              {"suggested", x.suggested},
+                              {"start_menu", x.start_menu_shortcut},
+                              {"desktop", x.desktop_shortcut},
+                              {"autostart", x.autostart},
+                              {"revert_version", x.revert_version},
+                              {"revert_until", x.revert_until}});
         });
 
-        w.bind("pickFolder", [&](const std::string& req) { return json(os::pick_folder(window, str_arg(req, 0))).dump(); });
+        w.bind("pickFolder", [&](const std::string& req) { return json_text(os::pick_folder(window, str_arg(req, 0))); });
         w.bind("pickFile", [&](const std::string& req) {
-            return json(os::pick_file(window, str_arg(req, 0), str_arg(req, 1) == "backup")).dump();
+            return json_text(os::pick_file(window, str_arg(req, 0), str_arg(req, 1) == "backup"));
         });
-        w.bind("openPath", [&](const std::string& req) { return json(os::open_path(str_arg(req, 0))).dump(); });
+        w.bind("openPath", [&](const std::string& req) { return json_text(os::open_path(str_arg(req, 0))); });
 
         w.bind("closeWindow", [&](const std::string&) {
             if (!busy) w.terminate();
@@ -113,7 +113,7 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
             if (worker.joinable()) worker.join();
             worker = std::thread([&w, &busy, &exit_code, request, container] {
                 auto progress = [&w](double fraction, const std::string& message) {
-                    const std::string js = "window.__progress(" + json(fraction).dump() + "," + json(message).dump() + ")";
+                    const std::string js = "window.__progress(" + json_text(fraction) + "," + json_text(to_valid_utf8(message)) + ")";
                     w.dispatch([&w, js] { w.eval(js); });
                 };
                 Result result;
@@ -124,13 +124,13 @@ int run_gui(const std::string& container, const std::string& dir, const std::str
                 }
                 exit_code = result.ok ? 0 : 1;
                 const json done{{"ok", result.ok},
-                                {"error", result.error},
+                                {"error", to_valid_utf8(result.error)},
                                 {"files_written", result.files_written},
                                 {"files_unchanged", result.files_unchanged},
                                 {"launcher", result.launcher},
                                 {"version", result.version},
-                                {"note", result.note}};
-                const std::string js = "window.__finished(" + done.dump() + ")";
+                                {"note", to_valid_utf8(result.note)}};
+                const std::string js = "window.__finished(" + json_text(done) + ")";
                 w.dispatch([&w, &busy, js] {
                     busy = false;
                     w.eval(js);

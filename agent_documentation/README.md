@@ -59,6 +59,7 @@ D++ forces C++20 on consumers; the whole project is C++20.
 12. **No paid services:** no Claude/LLM APIs or per-use costs; AI runs locally on a laptop CPU (see core/ml).
 13. **Politician trade data is read from the official sites, not guessed.** `HouseClerkClient` (yearly ZIP index + report PDFs via `pdf_text`) and `SenateEfdClient` (HTML; 403 outside the US) implement `DisclosureSource`; paper filings are skipped. Tests use fakes and saved real reports in `tests/fixtures/`, never the live sites. The first check per chamber stores without announcing.
 14. **A background thread never lets an exception escape:** wrap the loop body in `catch (const std::exception&)` *and* `catch (...)`, log, keep looping. (On MSVC an escaping exception otherwise ends the whole process; the SIGABRT handler only records it.)
+15. **Text from Windows isn't UTF-8.** `gai_strerror`, `error_code::message()` and some `e.what()` are in the ANSI code page, and `substr()` can cut a character in half. `log_write` and `fit_message` clean text with `to_valid_utf8`; anything serialized for a window uses `json_text()` (`src/common/json_text.h`), never `json.dump()`, which throws on bad bytes: that ended the server in issue #6.
 
 ## Conventions
 - Namespace `strojanka`, analysis code in `strojanka::analysis`. 4-space indent, ~120 cols, `snake_case` functions, `PascalCase` types, `kConstant`.

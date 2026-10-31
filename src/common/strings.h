@@ -38,6 +38,10 @@ std::string normalize_symbol(const std::string& s);
 // to that many characters, ending in "…".
 std::string short_company_name(const std::string& name, size_t max_chars = 0);
 size_t utf8_length(const std::string& s);  // characters, not bytes
+// The text as valid UTF-8. Windows hands out its own messages (getaddrinfo errors, error_code
+// messages, some exception texts) in the ANSI code page, and substr() can cut a character in half;
+// such bytes are decoded where possible and otherwise become U+FFFD. Valid UTF-8 is returned as is.
+std::string to_valid_utf8(const std::string& s);
 bool is_valid_symbol(const std::string& symbol);
 
 }  // namespace strojanka

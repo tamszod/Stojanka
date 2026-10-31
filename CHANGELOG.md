@@ -3,12 +3,15 @@
 All notable changes to Strojanka are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR.MINOR.PATCH. The version lives in the `VERSION` file.
 
-## [0.2.1] - Unreleased
+## [0.2.1] - 2026-10-31
 
 ### Added
 - **Price alerts**: `/watch stock:NVDA price:250` sends one direct message when the price rises (or falls) to that level; whether it waits for a rise or a fall comes from the price when the alert is set. `/watch` alone lists your price alerts, `/unwatch stock:NVDA` removes them (`price:250` for just one). A stock with a price alert is checked even if nobody watches it. Up to 25 alerts per user. As text: `watch NVDA 250`, `watch`, `unwatch NVDA`.
 - **Safety alerts** for stocks you hold: when a holding that has been comfortably in profit falls back close to your buying price, you get a warning while selling would still leave a profit after a sale fee (0.20 in the stock's currency by default, so the warning comes before the last ~20 cents of profit are gone). The warning line is about two normal days' moves of that stock above break-even (between 1.5% and 8%). It only comes while the price is falling, says it's your call whether to sell, comes once per fall and again only after the price has climbed back up. A drop straight past the line between two checks gets a "dropped below your buying price" message instead. `/safety` shows each holding's break-even and warning price; `/safety fee:0.50` sets your fee; `/safety alerts:off` silences them, `/safety stock:NVDA alerts:off` only for one stock. As text: `safety`, `safety fee 0.50`, `safety off`, `safety off NVDA`.
 - Direct messages that can't be delivered (DMs turned off) now fall back to the channel you last used a command in, for these alerts and admin warnings too, like PEAK/SUPPORT alerts already did.
+
+### Fixed
+- **Strojanka Server closed by itself when the internet dropped** (#6). On a Hungarian Windows the "no such host" error comes in the ANSI code page, not UTF-8. The Discord library handled the failed reconnect correctly, but when that log line reached the server window, its JSON conversion threw on a background thread and ended the whole program. Any log line with broken text could do the same, for example a long Discord message with accented letters cut off for the log. Text is now cleaned where it enters the log and Discord messages (Hungarian errors read correctly in `strojanka.log` too), the windows can no longer fail on bad text, and the log thread keeps running whatever happens. The installer had the same flaw when showing an error.
 
 Database: schema 8 (`price_alerts`, `safety_state`, `user_settings`), upgraded automatically with a backup first.
 

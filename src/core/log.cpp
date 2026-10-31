@@ -53,7 +53,7 @@ void log_set_file(const std::string& path) {
 void log_write(LogLevel level, const std::string& message) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (level < g_level) return;
-    const std::string line = utc_now_iso() + " [" + level_name(level) + "] " + message;
+    const std::string line = to_valid_utf8(utc_now_iso() + " [" + level_name(level) + "] " + message);
     (level >= LogLevel::Warn ? std::cerr : std::cout) << line << std::endl;
     if (g_file.is_open()) g_file << line << std::endl;
     if (g_listener) g_listener(level, line);
